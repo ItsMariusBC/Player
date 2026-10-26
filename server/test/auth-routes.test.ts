@@ -171,4 +171,30 @@ describe("auth routes", () => {
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { redirect: "/api/auth/login" });
   });
+
+  it("builds the callback URL from APP_URL even when the request host differs", async () => {
+    const t = createTestApp();
+    const { oidcCookie } = await startLogin(t);
+    const res = await t.app.request(
+      "http://other-host/api/auth/callback?code=admin&state=fake-state",
+      { headers: { cookie: oidcCookie } },
+    );
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), "/");
+    assert.ok(
+      t.oidc.lastCallbackUrl?.toString().startsWith("http://localhost:3000/api/auth/callback"),
+    );
+  });
+
+  it("clears player_oidc when the callback fails", async () => {
+    const t = createTestApp();
+    const { oidcCookie } = await startLogin(t);
+    const res = await t.app.request("/api/auth/callback?code=admin&state=wrong", {
+      headers: { cookie: oidcCookie },
+    });
+    assert.equal(res.status, 400);
+    const cleared = res.headers.getSetCookie().find((c) => c.startsWith("player_oidc="))!;
+    assert.ok(cleared);
+    assert.match(cleared, /Max-Age=0/i);
+  });
 });

@@ -61,13 +61,20 @@ export function authRoutes(deps: AuthDeps) {
   });
 
   app.get("/callback", async (c) => {
+    // The login attempt is single use: drop the sealed state on every exit.
+    deleteCookie(c, OIDC_COOKIE, { path: "/", secure });
     const invalid = () => jsonError(c, 400, "oidc_state", "Login state is missing or invalid");
     const pending = parseOidcCookie(getCookie(c, OIDC_COOKIE), config.session.secret, now());
     if (!pending) return invalid();
 
+    // Rebuild the callback URL from the configured app URL: the request's own
+    // origin may differ behind a reverse proxy. Only the query string is kept.
+    const callbackUrl = redirectUri();
+    callbackUrl.search = new URL(c.req.url).search;
+
     let tokens;
     try {
-      tokens = await oidc.completeLogin(new URL(c.req.url), {
+      tokens = await oidc.completeLogin(callbackUrl, {
         state: pending.state,
         nonce: pending.nonce,
         codeVerifier: pending.codeVerifier,
@@ -110,7 +117,6 @@ export function authRoutes(deps: AuthDeps) {
       now(),
     );
     writeSessionCookie(c, config, session.id, session.expiresAt, now());
-    deleteCookie(c, OIDC_COOKIE, { path: "/", secure });
     return c.redirect("/", 302);
   });
 

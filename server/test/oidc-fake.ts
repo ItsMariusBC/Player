@@ -5,14 +5,15 @@ export interface FakeAccount {
   refreshFails?: boolean;
 }
 
-export type FakeOidc = OidcAdapter & { revoked: string[] };
+export type FakeOidc = OidcAdapter & { revoked: string[]; lastCallbackUrl: URL | null };
 
 // In-memory OIDC adapter for tests. The authorization code is the account id.
 export function createFakeOidc(accounts: Record<string, FakeAccount>): FakeOidc {
   const revoked: string[] = [];
 
-  return {
+  const fake: FakeOidc = {
     revoked,
+    lastCallbackUrl: null,
     async startLogin() {
       const state = "fake-state";
       return {
@@ -23,6 +24,13 @@ export function createFakeOidc(accounts: Record<string, FakeAccount>): FakeOidc 
       };
     },
     async completeLogin(callbackUrl, expected): Promise<TokenSet> {
+      fake.lastCallbackUrl = callbackUrl;
+      if (
+        callbackUrl.origin + callbackUrl.pathname !==
+        expected.redirectUri.origin + expected.redirectUri.pathname
+      ) {
+        throw new Error("redirect_uri mismatch");
+      }
       const code = callbackUrl.searchParams.get("code") ?? "";
       if (callbackUrl.searchParams.get("state") !== expected.state) {
         throw new Error("state mismatch");
@@ -50,4 +58,5 @@ export function createFakeOidc(accounts: Record<string, FakeAccount>): FakeOidc 
       revoked.push(refreshToken);
     },
   };
+  return fake;
 }

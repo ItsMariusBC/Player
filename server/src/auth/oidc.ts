@@ -69,8 +69,12 @@ export async function createOidcAdapter(
       return { url, state, nonce, codeVerifier };
     },
     async completeLogin(callbackUrl, expected) {
+      // Use the registered redirect URI (origin + path) so the token request
+      // matches the authorize request even behind a TLS-terminating proxy.
+      const currentUrl = new URL(expected.redirectUri.origin + expected.redirectUri.pathname);
+      currentUrl.search = callbackUrl.search;
       return toTokenSet(
-        await client.authorizationCodeGrant(config, callbackUrl, {
+        await client.authorizationCodeGrant(config, currentUrl, {
           pkceCodeVerifier: expected.codeVerifier,
           expectedState: expected.state,
           expectedNonce: expected.nonce,

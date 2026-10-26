@@ -7,3 +7,9 @@ test-results
 playwright-report
 .superpowers
 .git
+.github
+.idea
+.vscode
+docs
+coverage
+*.tsbuildinfo

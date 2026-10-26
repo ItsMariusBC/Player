@@ -40,4 +40,6 @@ cp .env.example .env   # puis renseigner les variables obligatoires
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build --wait
 ```
 
+L'image tourne en `NODE_ENV=production`, qui impose `APP_URL` et `OIDC_ISSUER` en `https://`. Pour un essai local en `http://`, mettre dans `.env` `NODE_ENV=development`, `APP_URL=http://127.0.0.1:8080` et les variables OIDC. `TRUST_PROXY=true` se définit derrière un reverse proxy qui termine le HTTPS, pour que `X-Forwarded-*` soit pris en compte.
+
 Ouvrir `http://127.0.0.1:8080`. `PLAYER_PORT` permet de changer le port, `PLAYER_DATA_PATH` de stocker `/data` dans un dossier de l'hôte. Avec le fournisseur factice lancé sur l'hôte (`MOCK_OIDC_ISSUER=http://host.docker.internal:3002 yarn dev:oidc`), utiliser `OIDC_ISSUER=http://host.docker.internal:3002`. Arrêter avec la même commande Compose suivie de `down`.

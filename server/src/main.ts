@@ -25,7 +25,7 @@ migrate(db);
 const log = (event: string, data?: Record<string, unknown>) =>
   console.log(JSON.stringify({ event, ...data }));
 
-// Delays 1, 2, 4, 8 s then 8 s: 9 attempts, about 61 s of waiting in total.
+// Delays 1, 2, 4, then 8 s: 11 attempts, 63 s of waiting in total.
 async function discoverOidc() {
   try {
     return await retry(
@@ -34,7 +34,7 @@ async function discoverOidc() {
           allowInsecure: config.nodeEnv !== "production",
         }),
       {
-        attempts: 9,
+        attempts: 11,
         baseDelayMs: 1000,
         maxDelayMs: 8000,
         onRetry: (error, attempt, delayMs) =>

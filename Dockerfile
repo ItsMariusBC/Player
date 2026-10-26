@@ -18,6 +18,6 @@ RUN addgroup -g 101 player \
   && chown 101:101 /data
 USER 101:101
 EXPOSE 8080
-HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=3s --start-period=70s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 CMD ["node", "--no-warnings=ExperimentalWarning", "dist/server/main.js"]

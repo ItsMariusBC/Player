@@ -59,13 +59,15 @@ Un fichier `.env` est obligatoire à côté de `docker-compose.yml` (modèle : `
 - Obligatoires : `APP_URL` (origine publique, en HTTPS), `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (64 caractères hexadécimaux, `openssl rand -hex 32`).
 - Facultatives : `PORT`, `DATA_DIR`, `OIDC_GROUPS_CLAIM`, `OIDC_GROUP_ADMIN`, `OIDC_GROUP_USERS`, `SESSION_TTL_HOURS`, `MAX_UPLOAD_MB`, `TRUST_PROXY`, `NODE_ENV`.
 
-Sans variable obligatoire, le conteneur journalise `Configuration error: ...` et s'arrête. Si l'émetteur OIDC est momentanément injoignable, le démarrage réessaie pendant environ une minute (événement `oidc.discovery_retry`) avant d'abandonner.
+Sans variable obligatoire, le conteneur journalise `Configuration error: ...` et s'arrête. Si l'émetteur OIDC est momentanément injoignable, le démarrage réessaie pendant un peu plus d'une minute (événement `oidc.discovery_retry`) avant d'abandonner (63 s d'attente cumulée, d'où un `start_period` de 70 s pour le healthcheck).
 
 `PLAYER_DATA_PATH` choisit le stockage de `/data` : un chemin de l'hôte (bind, propriétaire uid 101) ou un nom de volume. Par défaut, le volume nommé `player-data`.
 
+En mode `production` (valeur par défaut de l'image), `APP_URL` et `OIDC_ISSUER` doivent être en `https://`, sinon le conteneur refuse de démarrer. Un essai local en `http://` demande, dans `.env`, `NODE_ENV=development`, `APP_URL=http://127.0.0.1:8080` et les variables OIDC.
+
 ### HTTPS et reverse proxy
 
-Le TLS est terminé par le reverse proxy (Dokploy, Traefik). Définir `TRUST_PROXY=true` derrière lui pour que le serveur lise l'origine et le protocole transmis, et garder `APP_URL` en `https://`. Aucun port hôte n'est publié par le Compose de production.
+Le TLS est terminé par le reverse proxy (Dokploy, Traefik). `TRUST_PROXY=true` se définit derrière le reverse proxy qui termine le HTTPS, pour que les en-têtes `X-Forwarded-*` soient pris en compte ; et garder `APP_URL` en `https://`. Aucun port hôte n'est publié par le Compose de production.
 
 ### Pré-requis Authentik
 
@@ -90,9 +92,11 @@ Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/au
 
 Ouvrir une PR de `developpment` vers `production`, attendre `CI required`, puis fusionner. Les deux branches exigent ce contrôle à jour et la résolution des conversations ; les force-push et suppressions sont refusés. Aucun autre approbateur n’est imposé sur ce dépôt personnel.
 
-Pour revenir en arrière, créer un commit de revert du changement concerné, le faire passer par la même CI, puis redéployer via Dokploy. L’import initial reste accessible dans l’historique. Le runtime actuel étant statique, ce retour du code ne nécessite pas de migration de base de données ; les données locales du navigateur restent indépendantes du déploiement.
+Pour revenir en arrière, créer un commit de revert du changement concerné, le faire passer par la même CI, puis redéployer via Dokploy. L’import initial reste accessible dans l’historique. Le serveur utilise SQLite avec des migrations : un retour arrière doit restaurer le volume `/data` en même temps que l'image précédente, car les migrations vont uniquement vers l'avant dans cet incrément. Les données locales du navigateur restent indépendantes du déploiement.
 
 ## État de la mise en place du 26 octobre 2026
+
+Texte historique, antérieur à l'authentification OIDC : l'image était alors un serveur statique Nginx. Les contrôles actuels de l'image sont : `/healthz` 200, `/api/session` 401, `/api/auth/login` 302, utilisateur 101, système de fichiers racine en lecture seule, base SQLite dans `/data`.
 
 Les contrôles locaux passent : lint, format de l’outillage, types, build, 6 tests unitaires, 2 tests navigateur, actionlint, ShellCheck, Hadolint, Gitleaks fichiers/historique, Trivy licences et vulnérabilités HIGH/CRITICAL. Docker a été construit et démarré : healthcheck, utilisateur non-root, HTML, Range de 128 octets et 404 d’un média absent sont vérifiés.
 

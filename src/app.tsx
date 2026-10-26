@@ -1,5 +1,10 @@
+import { AuthGate } from "@/components/auth-gate";
 import MusicPlayer from "@/components/player";
 
 export default function App() {
-  return <MusicPlayer />;
+  return (
+    <AuthGate>
+      <MusicPlayer />
+    </AuthGate>
+  );
 }

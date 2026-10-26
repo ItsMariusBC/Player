@@ -1,4 +1,5 @@
 // components/player.tsx
+import { LogoutLink } from "@/components/logout-link";
 import { useCallback, useEffect, useState, MouseEventHandler } from "react";
 import { Gradient } from "@/components/gradient";
 import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
@@ -164,6 +165,7 @@ export default function MusicPlayer() {
             <>
               <NowPlaying music={runtime.music} />
               <UpNext music={runtime.music} />
+              <LogoutLink />
             </>
           )}
           <ProgressBar music={runtime.music} playback={runtime.playback} />

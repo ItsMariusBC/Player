@@ -2,7 +2,7 @@
 
 ## Référence
 
-La structure reprend [celle du site Clyse](https://github.com/Clyse-Devs/clyse.dev/tree/dev/.github/workflows) : workflows réutilisables par étape, scans bloquants, artefacts et contrôle final `CI required`. Player utilise les runners GitHub `ubuntu-latest`, les runners de l’organisation Clyse ne sont pas partagés avec ce dépôt personnel.
+La structure reprend [celle du site Clyse](https://github.com/Clyse-Devs/clyse.dev/tree/dev/.github/workflows) : workflows réutilisables par étape, scans bloquants, artefacts et contrôle final `CI required`. Player utilise les runners GitHub Ubuntu 24.04, les runners de l’organisation Clyse ne sont pas partagés avec ce dépôt personnel.
 
 Chaque push sur `developpment` ou `production`, tag `v*`, PR vers ces branches, lancement manuel et contrôle hebdomadaire exécute toute la pipeline. Les PR obsolètes sont annulées. Les exécutions de branche restent actives.
 
@@ -66,3 +66,13 @@ L’image finale sert uniquement les fichiers statiques avec Nginx, utilisateur 
 Ouvrir une PR de `developpment` vers `production`, attendre `CI required`, puis fusionner. Les deux branches exigent ce contrôle à jour et la résolution des conversations ; les force-push et suppressions sont refusés. Aucun autre approbateur n’est imposé sur ce dépôt personnel.
 
 Pour revenir en arrière, créer un commit de revert du changement concerné, le faire passer par la même CI, puis redéployer via Dokploy. L’import initial reste accessible dans l’historique. Le runtime actuel étant statique, ce retour du code ne nécessite pas de migration de base de données ; les données locales du navigateur restent indépendantes du déploiement.
+
+## État de la mise en place du 26 octobre 2026
+
+Les contrôles locaux passent : lint, format de l’outillage, types, build, 6 tests unitaires, 2 tests navigateur, actionlint, ShellCheck, Hadolint, Gitleaks fichiers/historique, Trivy licences et vulnérabilités HIGH/CRITICAL. Docker a été construit et démarré : healthcheck, utilisateur non-root, HTML, Range de 128 octets et 404 d’un média absent sont vérifiés.
+
+Le [premier run GitHub](https://github.com/ItsMariusBC/Player/actions/runs/40363045369) est refusé avant démarrage par GitHub : paiement récent échoué ou plafond Actions atteint. Aucun job n’a exécuté de commande. La validation distante reste à faire après correction de la facturation ou configuration d’un runner personnel.
+
+La variable de dépôt `CI_RUNNER_LABELS` permet de choisir des labels JSON, par exemple `["self-hosted", "linux", "player"]`. Sans cette variable, les jobs utilisent `["ubuntu-24.04"]`. Un runner personnel Linux dédié doit disposer de Docker Compose, Node compatible avec les actions et des outils standard Ubuntu ; le setup installe Node, Bun et Yarn. Les runners de l’organisation Clyse ne peuvent pas être affectés directement à un dépôt personnel : un runner propre à Player doit être enregistré.
+
+L’import initial de la configuration est validé localement. Les protections sont actives pour les changements suivants ; le blocage de facturation ne donne pas lieu à un statut CI artificiellement réussi.

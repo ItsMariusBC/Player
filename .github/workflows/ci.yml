@@ -35,7 +35,7 @@ jobs:
     name: CI required
     if: ${{ always() }}
     needs: [lint, scan, build, test, deploy]
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-24.04"]') }}
     timeout-minutes: 1
     steps:
       - name: Refuser tout contrôle en échec, annulé ou ignoré

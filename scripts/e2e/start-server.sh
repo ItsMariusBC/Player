@@ -13,5 +13,13 @@ until curl -fs -o /dev/null "$url"; do
   sleep 1
 done
 
-rm -rf "${DATA_DIR:-./.data/e2e}"
+data_dir="${DATA_DIR:-./.data/e2e}"
+case "$data_dir" in
+  ./.data/?* | .data/?*) rm -rf "$data_dir" ;;
+  *)
+    echo "Refusing to wipe unsafe DATA_DIR: '$data_dir'" >&2
+    exit 1
+    ;;
+esac
+
 exec node --no-warnings=ExperimentalWarning dist/server/main.js

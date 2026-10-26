@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Dépendances, sorties de build et rapports générés"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.git/''',
+  '''(^|/)(dist|build|coverage|reports|playwright-report|test-results)/''',
+  '''\.tsbuildinfo$''',
+]

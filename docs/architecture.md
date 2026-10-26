@@ -60,3 +60,25 @@ Actifs uniquement quand aucun élément n'a le focus.
 | ↑ / ↓  | Piste précédente / suivante        |
 | ← / →  | Reculer / avancer de 5 s           |
 | M      | Afficher / masquer le mini-lecteur |
+
+## Développement
+
+`yarn dev` lance trois processus : Vite (`http://localhost:3000`, qui proxifie `/api` vers l'API), l'API (`http://localhost:8080`, configurée par `.env.development`) et un fournisseur OIDC factice (`http://localhost:3002`, `server/dev/mock-oidc.ts`). Le navigateur ne parle qu'à `:3000` : `APP_URL` vaut donc `http://localhost:3000` et le callback OIDC revient par le proxy.
+
+Pour tester la connexion, ouvrir `http://localhost:3000/api/auth/login` puis se connecter avec l'un des comptes (n'importe quel mot de passe) :
+
+| Compte        | Groupes     |
+| ------------- | ----------- |
+| `admin@test`  | `["admin"]` |
+| `user@test`   | `["users"]` |
+| `nobody@test` | `[]`        |
+
+`GET /api/session` renvoie ensuite le rôle déduit des groupes.
+
+Le fournisseur factice expose des routes de contrôle : `GET /mock/accounts` liste l'état des comptes, et `POST /mock/accounts/:id` avec un corps JSON `{ "groups": [...], "disabled": true }` modifie les groupes ou désactive un compte (le prochain rafraîchissement de session échoue). Exemple :
+
+```sh
+curl -X POST localhost:3002/mock/accounts/user@test -H 'content-type: application/json' -d '{"groups":["admin"]}'
+```
+
+`.env.development` est versionné : il ne contient aucun secret réel (clé de session et client OIDC propres au développement). Le dossier `.data/` (données de l'API) est ignoré par git.

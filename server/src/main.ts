@@ -5,6 +5,7 @@ import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { migrate } from "./migrations.ts";
+import { retry } from "./retry.ts";
 
 function readConfig() {
   try {
@@ -21,11 +22,37 @@ function readConfig() {
 const config = readConfig();
 const db = openDatabase(join(config.dataDir, "player.sqlite"));
 migrate(db);
-const oidc = await createOidcAdapter(config.oidc, {
-  allowInsecure: config.nodeEnv !== "production",
-});
 const log = (event: string, data?: Record<string, unknown>) =>
   console.log(JSON.stringify({ event, ...data }));
+
+// Delays 1, 2, 4, 8 s then 8 s: 9 attempts, about 61 s of waiting in total.
+async function discoverOidc() {
+  try {
+    return await retry(
+      () =>
+        createOidcAdapter(config.oidc, {
+          allowInsecure: config.nodeEnv !== "production",
+        }),
+      {
+        attempts: 9,
+        baseDelayMs: 1000,
+        maxDelayMs: 8000,
+        onRetry: (error, attempt, delayMs) =>
+          log("oidc.discovery_retry", {
+            attempt,
+            delayMs,
+            error: error instanceof Error ? `${error.name}: ${error.message}` : "unknown error",
+          }),
+      },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? `${error.name}: ${error.message}` : "unknown error";
+    console.error(`OIDC discovery failed after retries: ${reason}`);
+    process.exit(1);
+  }
+}
+
+const oidc = await discoverOidc();
 
 const app = createApp({ config, db, oidc, staticDir: "dist", log });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) =>

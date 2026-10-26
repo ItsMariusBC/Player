@@ -4,7 +4,8 @@ import Provider from "oidc-provider";
 
 // Development and test only: a tiny OIDC provider standing in for Authentik.
 const port = Number(process.env.MOCK_OIDC_PORT ?? 3002);
-const issuer = `http://localhost:${port}`;
+// Reachable from containers when set, e.g. http://host.docker.internal:3002.
+const issuer = process.env.MOCK_OIDC_ISSUER ?? `http://localhost:${port}`;
 
 interface MockAccount {
   name: string;

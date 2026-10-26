@@ -48,18 +48,43 @@ COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check docker compose down --volumes 
 
 La CI emploie un nom de projet et un tag d’image propres à chaque run ; le nettoyage ne touche que cette pile.
 
-## Mise en ligne avec Dokploy
+## Déploiement
 
-Le job `deploy:stack` valide un environnement Docker éphémère, comme dans Clyse. L’instance réelle, son domaine et ses accès restent à connecter. Aucun déploiement réel n’est déclenché par ce setup.
+L'image est unique : Node 24 sert le build Vite et l'API sur le port 8080, utilisateur 101, système de fichiers en lecture seule, `/tmp` éphémère. La base SQLite vit dans `/data`, seul chemin inscriptible.
 
-1. Créer un service Compose Dokploy relié à `ItsMariusBC/Player` et à la branche `production`, fichier `docker-compose.yml`.
-2. Configurer le domaine sur le service `player`, port interne `8080`, avec HTTPS. Aucun port hôte n’est publié par le Compose de production.
-3. Connecter l’application GitHub Dokploy au dépôt privé. Pour un environnement de développement, créer un second service relié à `developpment` avec son propre domaine.
-4. Déployer uniquement un commit dont `CI required` a réussi. L’autodeploy natif sur push est à laisser désactivé tant qu’un déclenchement après réussite de la CI n’est pas connecté ; il pourrait démarrer avant les contrôles.
+### Configuration
+
+Un fichier `.env` est obligatoire à côté de `docker-compose.yml` (modèle : `.env.example`). Variables :
+
+- Obligatoires : `APP_URL` (origine publique, en HTTPS), `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (64 caractères hexadécimaux, `openssl rand -hex 32`).
+- Facultatives : `PORT`, `DATA_DIR`, `OIDC_GROUPS_CLAIM`, `OIDC_GROUP_ADMIN`, `OIDC_GROUP_USERS`, `SESSION_TTL_HOURS`, `MAX_UPLOAD_MB`, `TRUST_PROXY`, `NODE_ENV`.
+
+Sans variable obligatoire, le conteneur journalise `Configuration error: ...` et s'arrête. Si l'émetteur OIDC est momentanément injoignable, le démarrage réessaie pendant environ une minute (événement `oidc.discovery_retry`) avant d'abandonner.
+
+`PLAYER_DATA_PATH` choisit le stockage de `/data` : un chemin de l'hôte (bind, propriétaire uid 101) ou un nom de volume. Par défaut, le volume nommé `player-data`.
+
+### HTTPS et reverse proxy
+
+Le TLS est terminé par le reverse proxy (Dokploy, Traefik). Définir `TRUST_PROXY=true` derrière lui pour que le serveur lise l'origine et le protocole transmis, et garder `APP_URL` en `https://`. Aucun port hôte n'est publié par le Compose de production.
+
+### Pré-requis Authentik
+
+- Un provider OAuth2/OpenID confidentiel, avec une application dont l'URL est `OIDC_ISSUER`.
+- URL de redirection autorisée : `${APP_URL}/api/auth/callback`.
+- Scopes : `openid profile email offline_access`, plus un scope mapping `groups` qui expose les groupes dans la revendication `groups`.
+- Durée de validité du refresh token supérieure à `SESSION_TTL_HOURS`.
+- Groupes `admin` et `users` (ou les noms définis par `OIDC_GROUP_*`).
+
+### Dokploy
+
+Le job `deploy:stack` valide un environnement Docker éphémère. L'instance réelle, son domaine et ses accès restent à connecter. Aucun déploiement réel n'est déclenché par ce setup.
+
+1. Créer un service Compose Dokploy relié à `ItsMariusBC/Player` et à la branche `production`, fichier `docker-compose.yml`, avec les variables ci-dessus dans l'environnement du service (écrites dans `.env`).
+2. Configurer le domaine sur le service `player`, port interne `8080`, avec HTTPS.
+3. Connecter l'application GitHub Dokploy au dépôt privé. Pour un environnement de développement, créer un second service relié à `developpment` avec son propre domaine, son client OIDC et son volume.
+4. Déployer uniquement un commit dont `CI required` a réussi. L'autodeploy natif sur push est à laisser désactivé tant qu'un déclenchement après réussite de la CI n'est pas connecté ; il pourrait démarrer avant les contrôles.
 
 Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/auto-deploy) pour le déclenchement par API après CI.
-
-L’image finale sert uniquement les fichiers statiques avec Nginx, utilisateur 101, système de fichiers en lecture seule et `/tmp` éphémère. Le serveur gère les requêtes Range et renvoie 404 pour un média absent. Le catalogue et les médias déjà présents restent intégrés au build.
 
 ## Promotion et retour arrière
 

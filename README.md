@@ -11,7 +11,7 @@ yarn install --frozen-lockfile
 yarn dev
 ```
 
-Le serveur démarre sur `http://localhost:3000`. `yarn.lock` est le seul lockfile du projet.
+`yarn dev` lance en parallèle Vite (`http://localhost:3000`), l'API (configurée par `.env.development`, versionné, sans secret réel) et un fournisseur OIDC factice sur le port 3002. Trois comptes de test, à choisir sur l'écran de connexion factice : `admin@test` (groupe admin), `user@test` (groupe users) et `nobody@test` (aucun groupe, accès refusé). `yarn.lock` est le seul lockfile du projet.
 
 ```sh
 yarn validate
@@ -33,8 +33,11 @@ L'[architecture du lecteur](docs/architecture.md) décrit les couches (moteur, c
 
 ## Docker local
 
+L'image unique sert l'application et l'API. Elle exige un fichier `.env` (modèle : `.env.example`, détails dans [docs/ci.md](docs/ci.md)) et un fournisseur OIDC joignable depuis le conteneur.
+
 ```sh
+cp .env.example .env   # puis renseigner les variables obligatoires
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build --wait
 ```
 
-Ouvrir `http://127.0.0.1:8080`. `PLAYER_PORT` permet de changer le port. Arrêter avec la même commande Compose suivie de `down`.
+Ouvrir `http://127.0.0.1:8080`. `PLAYER_PORT` permet de changer le port, `PLAYER_DATA_PATH` de stocker `/data` dans un dossier de l'hôte. Avec le fournisseur factice lancé sur l'hôte (`MOCK_OIDC_ISSUER=http://host.docker.internal:3002 yarn dev:oidc`), utiliser `OIDC_ISSUER=http://host.docker.internal:3002`. Arrêter avec la même commande Compose suivie de `down`.

@@ -29,6 +29,8 @@ export function mountStatic<E extends Env>(app: Hono<E>, dir: string): void {
 
   const assets = withCacheControl(serveStatic({ root: dir }), IMMUTABLE);
   app.use("/assets/*", assets);
+  // A missing asset is a 404, never the SPA fallback.
+  app.all("/assets/*", (c) => c.notFound());
 
   const asIs = serveStatic({ root: dir });
   const fallback = withCacheControl(serveStatic({ root: dir, path: "index.html" }), "no-cache");

@@ -49,6 +49,19 @@ describe("static files", () => {
     assertHeaders(res);
   });
 
+  it("returns 404 for a missing extensionless asset", async () => {
+    const res = await app.request("/assets/missing");
+    assert.equal(res.status, 404);
+    assertHeaders(res);
+  });
+
+  it("returns a JSON 404 for unknown API routes", async () => {
+    const res = await app.request("/api/nope", { headers: { "X-Requested-With": "player" } });
+    assert.equal(res.status, 404);
+    assert.deepEqual((await res.json()).error.code, "not_found");
+    assertHeaders(res);
+  });
+
   it("falls back to index.html for extensionless routes", async () => {
     const res = await app.request("/quelconque/route");
     assert.equal(res.status, 200);

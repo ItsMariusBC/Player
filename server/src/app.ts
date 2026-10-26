@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { AppConfig } from "./config.ts";
+import { jsonError } from "./http.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { mountStatic } from "./static.ts";
 
@@ -42,6 +43,9 @@ export function createApp(deps: AppDeps) {
       expiresAt: c.get("session").expiresAt.toISOString(),
     });
   });
+
+  // Unknown API paths must never reach the SPA fallback.
+  app.all("/api/*", (c) => jsonError(c, 404, "not_found", "Unknown API route"));
 
   if (deps.staticDir) mountStatic(app, deps.staticDir);
 

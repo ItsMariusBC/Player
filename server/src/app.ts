@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { AppConfig } from "./config.ts";
+import { authRoutes } from "./routes/auth.ts";
 
 export interface AppDeps {
   config: AppConfig;
@@ -29,6 +30,8 @@ export function createApp(deps: AppDeps) {
   app.get("/healthz", (c) => c.text("ok\n"));
 
   app.use("/api/*", requireRequestedWith);
+
+  app.route("/api/auth", authRoutes(auth));
 
   app.get("/api/session", requireSession(auth), (c) => {
     const user = c.get("user");

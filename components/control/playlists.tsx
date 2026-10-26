@@ -5,7 +5,6 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { MusicManager } from "@/lib/music-manager";
 import { createPlaylistManager, Playlist } from "@/lib/playlist-manager";
-import { QueueItem } from "@/lib/queue-manager";
 
 const inputVariants = "bg-transparent rounded-lg bg-purple-200/10 text-sm px-2 py-1 -mx-2 placeholder:text-purple-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400";
 

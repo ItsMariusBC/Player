@@ -49,7 +49,7 @@ export function ThemeSwitcherDialog() {
   );
 }
 
-function ThemeManager({ onClose }: { onClose: () => void }) {
+function ThemeManager({ onClose: _onClose }: { onClose: () => void }) {
   const [themes, setThemes] = useState<ColorTheme[]>([]);
   const [currentThemeId, setCurrentThemeId] = useState<string>('');
   const [showCustomForm, setShowCustomForm] = useState(false);

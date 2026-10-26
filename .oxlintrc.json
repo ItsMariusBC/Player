@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc"],
+  "jsPlugins": [
+    {
+      "name": "programming",
+      "specifier": "./lint/oxlint-plugin/index.js"
+    }
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "programming/require-suppression-reason": "error"
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "reports/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "overrides": [
+    {
+      "files": ["src/**/*", "components/**/*", "lib/**/*", "music/**/*"],
+      "rules": {
+        "programming/no-em-dash-copy": "error"
+      }
+    }
+  ]
+}

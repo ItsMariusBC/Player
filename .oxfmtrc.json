@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "semi": true,
+  "singleQuote": false,
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "reports/**",
+    "playwright-report/**",
+    "test-results/**",
+    "yarn.lock",
+    "docs/cdc/**",
+    "src/**",
+    "components/**",
+    "lib/**",
+    "music/**",
+    "index.html",
+    "tailwind.config.ts",
+    "vite.config.ts",
+    "postcss.config.js"
+  ]
+}

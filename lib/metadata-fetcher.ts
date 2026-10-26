@@ -1,5 +1,4 @@
 // lib/metadata-fetcher.ts
-import { Song } from "@/music/data";
 
 export interface SongMetadata {
   title: string;

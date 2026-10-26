@@ -1,6 +1,5 @@
 // lib/playlist-manager.ts
 import { Song } from "@/music/data";
-import { createStorageManager } from "@/lib/storage-manager";
 
 export interface Playlist {
   id: string;
@@ -24,7 +23,6 @@ export interface PlaylistManager {
 }
 
 export function createPlaylistManager(options?: PlaylistManagerOptions): PlaylistManager {
-  const storageManager = createStorageManager();
   
   // Load playlists from localStorage
   const getPlaylists = (): Playlist[] => {

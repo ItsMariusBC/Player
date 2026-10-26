@@ -1,5 +1,5 @@
 // components/music-visualizer/drawing.ts
-import { VisualizerConfig, VisualizerMode } from './config';
+import { VisualizerConfig } from './config';
 
 // Draw bars visualizer
 export const drawBars = (

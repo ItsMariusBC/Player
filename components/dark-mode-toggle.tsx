@@ -8,7 +8,7 @@ type ColorMode = 'light' | 'dark' | 'system';
 
 export function DarkModeToggle() {
   const [colorMode, setColorMode] = useState<ColorMode>('system');
-  const [isDark, setIsDark] = useState(false);
+  const [, setIsDark] = useState(false);
   
   // Effet d'initialisation
   useEffect(() => {

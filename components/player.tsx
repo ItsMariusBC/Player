@@ -7,8 +7,7 @@ import { EnhancedMusicVisualizer } from "@/components/music-visualizer/enhanced-
 import { formatSeconds } from "@/lib/format";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { Menu } from "@/components/menu";
-import { QueueItem } from "@/lib/queue-manager";
-import { Timeline, DurationControl } from "@/components/control/timeline";
+import { DurationControl } from "@/components/control/timeline";
 import { createThemeManager } from "@/lib/theme-manager";
 import { EnhancedPlayerInfo } from "@/components/enhanced-player-info";
 import { MiniPlayer } from "@/components/mini-player";
@@ -25,7 +24,7 @@ export default function MusicPlayer() {
   // État pour l'overlay d'interaction audio
   const [audioEnabled, setAudioEnabled] = useState(false);
   // trigger re-renders
-  const [digit, setDigit] = useState(0);
+  const [, setDigit] = useState(0);
   const [showMiniPlayer, setShowMiniPlayer] = useState(false);
 
   const paused = musicManager?.isPaused() ?? true;
@@ -148,7 +147,7 @@ export default function MusicPlayer() {
   }
 
   return (
-    <MotionConfig reducedMotion="user" features={["domAnimation"]}>
+    <MotionConfig reducedMotion="user">
       <SongNotificationProvider musicManager={musicManager}>
         <motion.main
           initial={{ opacity: 0 }}

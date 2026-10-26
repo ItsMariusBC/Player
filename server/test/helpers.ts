@@ -10,6 +10,7 @@ import { createFakeOidc, type FakeAccount, type FakeOidc } from "./oidc-fake.ts"
 export interface TestAppOptions {
   appUrl?: string;
   accounts?: Record<string, FakeAccount>;
+  staticDir?: string;
 }
 
 export const SESSION_COOKIE = "player_session";
@@ -44,7 +45,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     now = new Date(now.getTime() + ms);
   };
 
-  const app = createApp({ config, db, oidc, now: clock });
+  const app = createApp({ config, db, oidc, now: clock, staticDir: opts.staticDir });
 
   /** Creates the user and a session directly in the database, returns the Cookie header value. */
   function loginAs(accountId: string): string {

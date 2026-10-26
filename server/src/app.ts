@@ -4,6 +4,7 @@ import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middl
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { AppConfig } from "./config.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { mountStatic } from "./static.ts";
 
 export interface AppDeps {
   config: AppConfig;
@@ -41,6 +42,8 @@ export function createApp(deps: AppDeps) {
       expiresAt: c.get("session").expiresAt.toISOString(),
     });
   });
+
+  if (deps.staticDir) mountStatic(app, deps.staticDir);
 
   return app;
 }

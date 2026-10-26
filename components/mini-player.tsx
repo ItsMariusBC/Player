@@ -1,62 +1,23 @@
 // components/mini-player.tsx
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState } from "react";
+import { m, AnimatePresence } from "framer-motion";
 import { MusicManager } from "@/lib/music-manager";
-import { QueueItem } from "@/lib/queue-manager";
+import { PlaybackController } from "@/lib/playback-controller";
+import { usePlaybackState } from "@/lib/hooks/use-playback-state";
 import { formatSeconds } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
-export function MiniPlayer({ 
-  musicManager, 
-  isVisible = true
-}: { 
-  musicManager: MusicManager;
+export function MiniPlayer({
+  music,
+  playback,
+  isVisible = true,
+}: {
+  music: MusicManager;
+  playback: PlaybackController;
   isVisible?: boolean;
 }) {
-  const [currentSong, setCurrentSong] = useState<QueueItem | undefined>(
-    musicManager?.queueManager.getCurrentSong()
-  );
-  const [isPlaying, setIsPlaying] = useState(!musicManager?.isPaused());
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const { currentSong, isPlaying, currentTime, duration } = usePlaybackState(music);
   const [isExpanded, setIsExpanded] = useState(false);
-  
-  // Mettre à jour l'état lorsque la chanson ou l'état de lecture change
-  useEffect(() => {
-    const handleUpdate = () => {
-      setCurrentSong(musicManager.queueManager.getCurrentSong());
-      setIsPlaying(!musicManager.isPaused());
-    };
-    
-    const handleTimeUpdate = (time: number, totalDuration: number) => {
-      setCurrentTime(time);
-      setDuration(totalDuration);
-    };
-    
-    // Sauvegarde des callbacks originaux
-    const originalOnStateChange = musicManager.onStateChange;
-    const originalOnTimeUpdate = musicManager.onTimeUpdate;
-    
-    // Configuration des nouveaux callbacks
-    musicManager.onStateChange = () => {
-      handleUpdate();
-      if (originalOnStateChange) originalOnStateChange();
-    };
-    
-    musicManager.onTimeUpdate = (time: number, totalDuration: number) => {
-      handleTimeUpdate(time, totalDuration);
-      if (originalOnTimeUpdate) originalOnTimeUpdate(time, totalDuration);
-    };
-    
-    // État initial
-    handleUpdate();
-    
-    return () => {
-      // Restauration des callbacks originaux
-      musicManager.onStateChange = originalOnStateChange;
-      musicManager.onTimeUpdate = originalOnTimeUpdate;
-    };
-  }, [musicManager]);
   
   // Calculer le pourcentage de progression
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -66,7 +27,7 @@ export function MiniPlayer({
   }
   
   return (
-    <motion.div
+    <m.div
       className="fixed bottom-4 right-4 z-50 shadow-xl"
       drag
       dragConstraints={{ top: 0, right: 0, bottom: 0, left: 0 }}
@@ -76,7 +37,7 @@ export function MiniPlayer({
       exit={{ y: 100, opacity: 0 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
     >
-      <motion.div
+      <m.div
         className={cn(
           "bg-purple-800/80 backdrop-blur-md text-purple-100 rounded-xl overflow-hidden",
           isExpanded ? "w-72" : "w-56"
@@ -86,7 +47,7 @@ export function MiniPlayer({
       >
         {/* Barre de progression */}
         <div className="h-1 bg-purple-200/10 w-full">
-          <motion.div 
+          <m.div 
             className="h-full bg-purple-500"
             style={{ width: `${progressPercent}%` }}
           />
@@ -103,10 +64,13 @@ export function MiniPlayer({
                 <img
                   src={currentSong.picture}
                   alt={currentSong.name}
-                  className="w-10 h-10 rounded object-cover"
+                  width={40}
+                  height={40}
+                  decoding="async"
+                  className="w-10 h-10 rounded-sm object-cover"
                 />
               ) : (
-                <div className="w-10 h-10 bg-purple-400/20 rounded flex items-center justify-center">
+                <div className="w-10 h-10 bg-purple-400/20 rounded-sm flex items-center justify-center">
                   <svg
                     width="18"
                     height="18"
@@ -125,12 +89,12 @@ export function MiniPlayer({
               )}
               
               {/* Indicateur d'expansion */}
-              <motion.div
+              <m.div
                 className="absolute -top-1 -right-1 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center text-white text-xs"
                 animate={{ rotate: isExpanded ? 180 : 0 }}
               >
                 {isExpanded ? "-" : "+"}
-              </motion.div>
+              </m.div>
             </div>
             
             {/* Informations sur la chanson */}
@@ -142,7 +106,7 @@ export function MiniPlayer({
             {/* Bouton lecture/pause */}
             <button
               className="p-2 rounded-full hover:bg-purple-200/10 transition-colors"
-              onClick={() => isPlaying ? musicManager.pause() : musicManager.play()}
+              onClick={() => playback.toggle()}
             >
               {isPlaying ? (
                 <svg
@@ -178,7 +142,7 @@ export function MiniPlayer({
           {/* Section étendue */}
           <AnimatePresence>
             {isExpanded && (
-              <motion.div
+              <m.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
@@ -194,7 +158,7 @@ export function MiniPlayer({
                 <div className="flex justify-between">
                   <button
                     className="p-2 rounded-full hover:bg-purple-200/10 transition-colors"
-                    onClick={() => musicManager.queueManager.previous()}
+                    onClick={() => playback.previous()}
                   >
                     <svg
                       width="16"
@@ -213,7 +177,7 @@ export function MiniPlayer({
                   
                   <button
                     className="p-2 rounded-full hover:bg-purple-200/10 transition-colors"
-                    onClick={() => musicManager.setTime(Math.max(0, currentTime - 10))}
+                    onClick={() => playback.seekBy(-10)}
                   >
                     <svg
                       width="16"
@@ -232,7 +196,7 @@ export function MiniPlayer({
                   
                   <button
                     className="p-2 rounded-full hover:bg-purple-200/10 transition-colors"
-                    onClick={() => musicManager.setTime(Math.min(duration, currentTime + 10))}
+                    onClick={() => playback.seekBy(10)}
                   >
                     <svg
                       width="16"
@@ -251,7 +215,7 @@ export function MiniPlayer({
                   
                   <button
                     className="p-2 rounded-full hover:bg-purple-200/10 transition-colors"
-                    onClick={() => musicManager.queueManager.next()}
+                    onClick={() => playback.next()}
                   >
                     <svg
                       width="16"
@@ -268,11 +232,11 @@ export function MiniPlayer({
                     </svg>
                   </button>
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </div>
-      </motion.div>
-    </motion.div>
+      </m.div>
+    </m.div>
   );
 }

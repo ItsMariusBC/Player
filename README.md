@@ -1,6 +1,6 @@
 # Player
 
-Lecteur musical React 18, TypeScript, Vite et Tailwind CSS. Le projet existant est conservé dans ce dépôt privé.
+Lecteur musical React 19, TypeScript, Vite 8 et Tailwind CSS 4. Le projet existant est conservé dans ce dépôt privé.
 
 ## Développement
 
@@ -28,6 +28,8 @@ yarn test:e2e
 - Les PR vers ces deux branches doivent passer `CI required`.
 
 La [documentation CI/CD](docs/ci.md) détaille les contrôles, Docker et le retour arrière.
+
+L'[architecture du lecteur](docs/architecture.md) décrit les couches (moteur, contrôleurs, composition, présentation) et les raccourcis clavier.
 
 ## Docker local
 

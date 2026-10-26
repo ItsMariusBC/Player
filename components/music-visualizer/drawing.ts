@@ -28,49 +28,33 @@ export const drawBars = (
     }
   }
 
-  // Draw the bars
+  // Draw the bars: every rectangle goes into one path, filled once per frame.
   ctx.fillStyle = config.barColor;
-  
-  for (let i = 0; i < data.length; i++) {
-    const dataValue = data[i] || 1;
-    const barHeight = dataValue / 2; // Scale down for better visuals
-    
-    const x = i * (config.barWidth + config.gap);
-    const y = canvas.height - barHeight;
-    const width = config.barWidth;
-    const height = barHeight;
+  const maxBarHeight = canvas.height * config.heightScale;
+  const toHeight = (value: number) => Math.max(1, (value / 255) * maxBarHeight);
+  const rounded = config.rounded && typeof ctx.roundRect === "function";
+  const width = config.barWidth;
+  const step = config.barWidth + config.gap;
 
-    if (config.rounded && ctx.roundRect) {
-      ctx.beginPath();
-      ctx.roundRect(x, y, width, height, 20);
-      ctx.fill();
-    } else {
-      ctx.fillRect(x, y, width, height);
-    }
-    
-    // Draw mirror if mirrorMode is enabled
-    if (config.mirrorMode) {
-      const mirrorY = 0;
-      if (config.rounded && ctx.roundRect) {
-        ctx.beginPath();
-        ctx.roundRect(x, mirrorY, width, barHeight, 20);
-        ctx.fill();
-      } else {
-        ctx.fillRect(x, mirrorY, width, barHeight);
-      }
-    }
-    
-    // Draw peak markers if enabled
+  const addBar = (x: number, y: number, height: number) => {
+    if (rounded) ctx.roundRect(x, y, width, height, 20);
+    else ctx.rect(x, y, width, height);
+  };
+
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const barHeight = toHeight(data[i] || 1);
+    const x = i * step;
+    addBar(x, canvas.height - barHeight, barHeight);
+    if (config.mirrorMode) addBar(x, 0, barHeight);
+
     if (config.showPeaks && peakValues[i]) {
-      const peakY = canvas.height - peakValues[i] / 2;
-      ctx.fillRect(x, peakY, width, 2);
-      
-      if (config.mirrorMode) {
-        const mirrorPeakY = peakValues[i] / 2;
-        ctx.fillRect(x, mirrorPeakY, width, 2);
-      }
+      const peakHeight = toHeight(peakValues[i]);
+      ctx.rect(x, canvas.height - peakHeight, width, 2);
+      if (config.mirrorMode) ctx.rect(x, peakHeight, width, 2);
     }
   }
+  ctx.fill();
 };
 
 // Draw wave visualizer

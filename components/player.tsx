@@ -1,68 +1,50 @@
 // components/player.tsx
-import { useEffect, useRef, useState, useMemo, MouseEventHandler } from "react";
+import { useCallback, useEffect, useState, MouseEventHandler } from "react";
 import { Gradient } from "@/components/gradient";
-import { createMusicManager, MusicManager } from "@/lib/music-manager";
-import { createShortcutManager } from "@/lib/shortcut-manager";
-import { EnhancedMusicVisualizer } from "@/components/music-visualizer/enhanced-visualizer";
-import { formatSeconds } from "@/lib/format";
-import { AnimatePresence, motion, MotionConfig } from "framer-motion";
-import { Menu } from "@/components/menu";
-import { DurationControl } from "@/components/control/timeline";
-import { createThemeManager } from "@/lib/theme-manager";
-import { EnhancedPlayerInfo } from "@/components/enhanced-player-info";
+import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
+import { useSongGradient } from "@/lib/hooks/use-song-gradient";
+import { VisualizerCard, VisualizerStage } from "@/components/visualizer-panel";
+import { AnimatePresence, LazyMotion, MotionConfig, m } from "framer-motion";
+
+const loadMotionFeatures = () => import("@/lib/motion-features").then((mod) => mod.default);
+import { NowPlaying } from "@/components/now-playing";
+import { SongList } from "@/components/song-list";
 import { MiniPlayer } from "@/components/mini-player";
+import { UpNext } from "@/components/up-next";
+import { ProgressBar } from "@/components/progress-bar";
 import { SongNotificationProvider } from "@/components/song-notification";
-import { DarkModeToggle } from "@/components/dark-mode-toggle";
 import { cn } from "@/lib/cn";
 import { buttonVariants } from "@/components/ui/button";
 
 export default function MusicPlayer() {
-  const timelineRef = useRef<DurationControl>();
-  const timeLabelRef = useRef<HTMLParagraphElement>(null);
-
-  const [musicManager, setMusicManager] = useState<MusicManager>();
+  const [runtime, setRuntime] = useState<PlayerRuntime>();
+  const musicManager = runtime?.music;
   // État pour l'overlay d'interaction audio
   const [audioEnabled, setAudioEnabled] = useState(false);
   // trigger re-renders
   const [, setDigit] = useState(0);
   const [showMiniPlayer, setShowMiniPlayer] = useState(false);
+  // Expanded visualizer: the rest of the UI is unmounted, only the shader stays.
+  const [visualizerExpanded, setVisualizerExpanded] = useState(false);
+  const closeVisualizer = useCallback(() => setVisualizerExpanded(false), []);
 
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
-
-  // Initialize theme manager
-  useEffect(() => {
-    createThemeManager();
-  }, []);
+  const gradient = useSongGradient(currentSong);
 
   useEffect(() => {
-    const manager = createMusicManager({
-      onTimeUpdate: (currentTime, duration) => {
-        if (timeLabelRef.current) {
-          timeLabelRef.current.innerText = formatSeconds(currentTime);
-        }
-
-        timelineRef.current?.((currentTime / duration) * 100);
-      },
-      onStateChange: () => {
-        setDigit((prev) => prev + 1);
-      },
-      onNext() {
-        setDigit((prev) => prev + 1);
-      },
-      onSongListUpdated() {
-        setDigit((prev) => prev + 1);
-      },
+    const player = createPlayerRuntime({
+      onToggleMiniPlayer: () => setShowMiniPlayer((prev) => !prev),
     });
-
-    const shortcut = createShortcutManager({ musicManager: manager });
-
-    shortcut.bind();
-    setMusicManager(manager);
+    // Any engine event other than time progress may change what is rendered.
+    const unsubscribe = player.music.subscribe((event) => {
+      if (event.type !== "time") setDigit((prev) => prev + 1);
+    });
+    setRuntime(player);
 
     return () => {
-      shortcut.destroy();
-      manager.destroy();
+      unsubscribe();
+      player.destroy();
     };
   }, []);
 
@@ -84,7 +66,7 @@ export default function MusicPlayer() {
   }, []);
 
   const onClick: MouseEventHandler = (e) => {
-    if (!musicManager || e.button !== 0) return;
+    if (!runtime || e.button !== 0) return;
 
     const target = e.target as Element;
     const isTrigger = target.matches(
@@ -92,31 +74,9 @@ export default function MusicPlayer() {
     );
 
     if (!isTrigger) return;
-
-    if (musicManager.isPaused()) musicManager.play();
-    else musicManager.pause();
+    runtime.playback.toggle();
   };
 
-  // Add a key handler for space to pause/play
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && musicManager) {
-        if (musicManager.isPaused()) musicManager.play();
-        else musicManager.pause();
-        e.preventDefault();
-      }
-      
-      // Toggle mini player with M key
-      if (e.code === 'KeyM') {
-        setShowMiniPlayer(prev => !prev);
-        e.preventDefault();
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [musicManager]);
-  
   // Active le mini-player après 5 secondes de scrolling vers le bas
   useEffect(() => {
     if (!musicManager) return;
@@ -135,7 +95,7 @@ export default function MusicPlayer() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [musicManager]);
 
-  if (!musicManager) {
+  if (!runtime) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -147,66 +107,43 @@ export default function MusicPlayer() {
   }
 
   return (
+    <LazyMotion features={loadMotionFeatures} strict>
     <MotionConfig reducedMotion="user">
-      <SongNotificationProvider musicManager={musicManager}>
-        <motion.main
+      <SongNotificationProvider notifications={runtime.notifications}>
+        <m.main
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{
             ease: "easeInOut",
             duration: 0.5,
           }}
-          className="relative min-h-svh px-6 py-8 z-[2] text-purple-100 md:p-12"
+          className="relative min-h-svh flex items-center px-6 py-8 z-2 text-purple-100 md:p-12"
           onMouseDown={onClick}
         >
-          <div className="max-w-6xl mx-auto">
-            <div className="flex justify-between items-start mb-8">
-              <AnimatedTitle text={paused ? "Click to Play" : "Sheldon Player"} />
-              
-              <div className="flex space-x-2">
-                <DarkModeToggle />
-                {musicManager && <Menu musicManager={musicManager} />}
-              </div>
-            </div>
-            
+          {visualizerExpanded ? (
+            <VisualizerStage analyser={runtime.music.analyser} onClose={closeVisualizer} />
+          ) : (
+          <div className="w-full max-w-6xl mx-auto">
             <div className="grid md:grid-cols-12 gap-8">
               <div className="md:col-span-8">
-                {/* Lecteur amélioré */}
-                {musicManager && (
-                  <EnhancedPlayerInfo musicManager={musicManager} />
-                )}
-                
-                <div className="mt-8">
-                  <h2 className="text-xl font-medium mb-4">Visualiseur</h2>
-                  <div className="bg-purple-800/10 backdrop-blur-sm p-4 rounded-lg" data-trigger-container={true}>
-                    {musicManager && (
-                      <EnhancedMusicVisualizer
-                        className="w-full h-48 md:h-64"
-                        analyser={musicManager.analyser}
-                      />
-                    )}
-                  </div>
+                <div>
+                  <VisualizerCard
+                    analyser={runtime.music.analyser}
+                    onExpand={() => setVisualizerExpanded(true)}
+                  />
                 </div>
               </div>
               
               <div className="md:col-span-4">
-                <h2 className="text-xl font-medium mb-4">File d'attente</h2>
-                <div className="bg-purple-800/10 backdrop-blur-sm p-4 rounded-lg max-h-[500px] overflow-y-auto">
-                  <SongList musicManager={musicManager} />
+                <div className="bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px] overflow-y-auto">
+                  <SongList music={runtime.music} playback={runtime.playback} />
                 </div>
               </div>
             </div>
-            
-            <div className="mt-8 pt-8 border-t border-purple-200/10 text-center text-sm text-purple-200">
-              <p>
-                Appuyez sur [M] pour afficher/masquer le mini-player
-                <br />
-                Utilisez les touches fléchées et espace pour contrôler la lecture
-              </p>
-            </div>
           </div>
+          )}
           
-          <motion.div
+          <m.div
             data-trigger-container={true}
             className="absolute inset-0 z-[-1]"
             animate={{
@@ -220,26 +157,34 @@ export default function MusicPlayer() {
               duration: 1,
             }}
           >
-            <Gradient currentId={currentSong?.id ?? 0} />
-          </motion.div>
+            <Gradient colors={gradient} />
+          </m.div>
           
+          {!visualizerExpanded && (
+            <>
+              <NowPlaying music={runtime.music} />
+              <UpNext music={runtime.music} />
+            </>
+          )}
+          <ProgressBar music={runtime.music} playback={runtime.playback} />
+
           {/* Mini-player */}
           <AnimatePresence>
-            {showMiniPlayer && musicManager && (
-              <MiniPlayer musicManager={musicManager} />
+            {showMiniPlayer && !visualizerExpanded && (
+              <MiniPlayer music={runtime.music} playback={runtime.playback} />
             )}
           </AnimatePresence>
           
           {/* Overlay pour demander l'activation audio */}
           <AnimatePresence>
             {!audioEnabled && (
-              <motion.div 
+              <m.div 
                 className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
               >
-                <motion.div 
+                <m.div 
                   className="bg-purple-900/90 backdrop-blur-md p-8 rounded-lg text-center max-w-md"
                   initial={{ scale: 0.9, y: 20 }}
                   animate={{ scale: 1, y: 0 }}
@@ -268,102 +213,13 @@ export default function MusicPlayer() {
                     </svg>
                     Activer le lecteur
                   </button>
-                </motion.div>
-              </motion.div>
+                </m.div>
+              </m.div>
             )}
           </AnimatePresence>
-        </motion.main>
+        </m.main>
       </SongNotificationProvider>
     </MotionConfig>
-  );
-}
-
-function AnimatedTitle({ text }: { text: string }) {
-  const words = useMemo(() => text.split(" "), [text]);
-  let index = 0;
-
-  return (
-    <h1 className="text-5xl md:text-7xl font-light leading-[0.9] tracking-[-0.05em]">
-      {words.map((word, i) => (
-        <motion.span key={i} className="inline-block mr-4 break-keep">
-          {word.split("").map((c, j) => (
-            <motion.span
-              key={`${c}-${j}`}
-              className="inline-block"
-              initial={{ y: 20, opacity: 0 }}
-              animate={{
-                y: 0,
-                opacity: 1,
-                transition: {
-                  ease: "easeInOut",
-                  delay: index++ * 0.04,
-                  duration: 0.2,
-                },
-              }}
-            >
-              {c}
-            </motion.span>
-          ))}
-        </motion.span>
-      ))}
-    </h1>
-  );
-}
-
-// Composant SongList pour la file d'attente
-function SongList({ musicManager }: { musicManager: MusicManager }) {
-  const currentSong = musicManager.queueManager.getCurrentSong();
-  
-  return (
-    <div className="space-y-2">
-      {musicManager.queueManager.songs.map((song) => (
-        <div
-          key={song.id}
-          className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all ${
-            song.id === currentSong?.id 
-              ? "bg-purple-500/20" 
-              : "hover:bg-purple-200/5"
-          }`}
-          onClick={() => musicManager.queueManager.setIndex(song.id)}
-        >
-          {song.picture ? (
-            <img src={song.picture} alt={song.name} className="w-10 h-10 rounded object-cover" />
-          ) : (
-            <div className="w-10 h-10 bg-purple-400/10 rounded flex items-center justify-center">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-            </div>
-          )}
-          
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{song.name}</div>
-            <div className="text-xs text-purple-200 truncate">{song.author}</div>
-          </div>
-          
-          {song.id === currentSong?.id && (
-            <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-          )}
-        </div>
-      ))}
-      
-      {musicManager.queueManager.songs.length === 0 && (
-        <div className="text-center py-8 text-purple-200">
-          <p>Aucune chanson dans la file d'attente</p>
-          <p className="text-sm mt-2">Ajoutez des chansons via le menu</p>
-        </div>
-      )}
-    </div>
+    </LazyMotion>
   );
 }

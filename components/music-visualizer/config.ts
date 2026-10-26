@@ -18,6 +18,8 @@ export interface VisualizerConfig {
   showPeaks: boolean;
   mirrorMode: boolean;
   rounded: boolean;
+  /** Height of a full-scale bar as a fraction of the canvas height (0..1). */
+  heightScale: number;
 }
 
 export const DEFAULT_CONFIG: VisualizerConfig = {
@@ -32,7 +34,8 @@ export const DEFAULT_CONFIG: VisualizerConfig = {
   backgroundColor: 'transparent',
   showPeaks: false,
   mirrorMode: false,
-  rounded: true
+  rounded: true,
+  heightScale: 0.6,
 };
 
 // Load config from localStorage

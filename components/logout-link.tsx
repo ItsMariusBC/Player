@@ -18,7 +18,7 @@ export function LogoutLink() {
         type="button"
         aria-label="Se déconnecter"
         onClick={onLogout}
-        className="pointer-events-auto flex items-center gap-3 text-sm text-purple-200/70 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] hover:text-purple-50"
+        className="pointer-events-auto flex items-center gap-2 rounded-md text-sm text-purple-200/70 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-colors hover:text-purple-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60"
       >
         <svg
           aria-hidden="true"
@@ -35,6 +35,7 @@ export function LogoutLink() {
           <polyline points="16 17 21 12 16 7" />
           <line x1="21" y1="12" x2="9" y2="12" />
         </svg>
+        <span>Se déconnecter</span>
       </button>
     </div>
   );

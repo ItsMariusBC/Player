@@ -1,0 +1,14 @@
+services:
+  player:
+    build: .
+    image: player:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [developpment, production]
+    tags: ["v*"]
+  pull_request:
+    branches: [developpment, production]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+  scan:
+    uses: ./.github/workflows/scan.yml
+  build:
+    needs: lint
+    uses: ./.github/workflows/build.yml
+  test:
+    needs: build
+    uses: ./.github/workflows/test.yml
+  deploy:
+    needs: lint
+    uses: ./.github/workflows/deploy.yml
+  quality:
+    name: CI required
+    if: ${{ always() }}
+    needs: [lint, scan, build, test, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Refuser tout contrôle en échec, annulé ou ignoré
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS" | jq -e 'length == 5 and all(. == "success")'

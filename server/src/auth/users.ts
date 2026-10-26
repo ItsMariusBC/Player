@@ -62,3 +62,18 @@ export function upsertUser(
     groups: JSON.parse(row.groups) as string[],
   };
 }
+
+export function findUserById(db: DatabaseSync, id: string): UserRecord | null {
+  const row = db
+    .prepare("SELECT id, issuer, subject, display_name, email, groups FROM users WHERE id = ?")
+    .get(id) as unknown as UserRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    issuer: row.issuer,
+    subject: row.subject,
+    displayName: row.display_name,
+    email: row.email,
+    groups: JSON.parse(row.groups) as string[],
+  };
+}

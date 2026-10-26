@@ -88,6 +88,59 @@ describe("GET /api/session", () => {
   });
 });
 
+describe("refresh hardening", () => {
+  const countSessions = (t: ReturnType<typeof createTestApp>) =>
+    (t.db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n;
+
+  it("treats a refresh without claims as failed and creates no user", async () => {
+    const t = createTestApp();
+    const cookie = t.loginAs("user");
+    t.accounts.user!.claims = {};
+    t.advance(16 * MINUTE);
+    const res = await t.app.request("/api/session", { headers: { cookie } });
+    assert.equal(res.status, 401);
+    assert.equal(((await res.json()) as { error: { code: string } }).error.code, "session_expired");
+    assert.equal(countSessions(t), 0);
+    const users = t.db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number };
+    assert.equal(users.n, 1);
+  });
+
+  it("treats a refresh with another sub as failed and leaves the other user untouched", async () => {
+    const t = createTestApp();
+    t.loginAs("admin");
+    const cookie = t.loginAs("user");
+    t.accounts.user!.claims = { sub: "admin-sub", name: "Evil", groups: [] };
+    t.advance(16 * MINUTE);
+    const res = await t.app.request("/api/session", { headers: { cookie } });
+    assert.equal(res.status, 401);
+    assert.equal(((await res.json()) as { error: { code: string } }).error.code, "session_expired");
+    const admin = t.db
+      .prepare("SELECT display_name, groups FROM users WHERE subject = 'admin-sub'")
+      .get() as { display_name: string; groups: string };
+    assert.equal(admin.display_name, "Admin Test");
+    assert.deepEqual(JSON.parse(admin.groups), ["admin"]);
+  });
+
+  it("runs a single refresh for concurrent requests", async () => {
+    const t = createTestApp();
+    const cookie = t.loginAs("user");
+    const original = t.oidc.refresh;
+    let calls = 0;
+    t.oidc.refresh = async (token) => {
+      calls += 1;
+      return original(token);
+    };
+    t.advance(16 * MINUTE);
+    const [a, b] = await Promise.all([
+      t.app.request("/api/session", { headers: { cookie } }),
+      t.app.request("/api/session", { headers: { cookie } }),
+    ]);
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.equal(calls, 1);
+  });
+});
+
 describe("app", () => {
   it("answers GET /healthz without a session", async () => {
     const t = createTestApp();

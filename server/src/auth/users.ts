@@ -37,8 +37,8 @@ export function upsertUser(
       `INSERT INTO users (id, issuer, subject, display_name, email, groups, created_at, last_seen_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (issuer, subject) DO UPDATE SET
-         display_name = excluded.display_name,
-         email = excluded.email,
+         display_name = COALESCE(excluded.display_name, users.display_name),
+         email = COALESCE(excluded.email, users.email),
          groups = excluded.groups,
          last_seen_at = excluded.last_seen_at
        RETURNING id, issuer, subject, display_name, email, groups`,

@@ -27,6 +27,16 @@ describe("upsertUser", () => {
   });
 });
 
+describe("upsertUser profile", () => {
+  it("keeps the existing name and email when the new claims omit them", () => {
+    upsertUser(db, { ...identity, displayName: "Ada", email: "ada@test", groups: ["a"] }, now);
+    const again = upsertUser(db, { ...identity, groups: ["b"] }, now);
+    assert.equal(again.displayName, "Ada");
+    assert.equal(again.email, "ada@test");
+    assert.deepEqual(again.groups, ["b"]);
+  });
+});
+
 describe("sessions", () => {
   it("creates a session and finds it with the decrypted refresh token", () => {
     const user = upsertUser(db, { ...identity, groups: [] }, now);

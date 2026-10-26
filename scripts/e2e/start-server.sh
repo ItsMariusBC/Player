@@ -15,7 +15,7 @@ case "$data_dir" in
     ;;
 esac
 
-url="http://127.0.0.1:3002/.well-known/openid-configuration"
+url="${MOCK_OIDC_URL:-http://127.0.0.1:3002}/.well-known/openid-configuration"
 i=0
 until curl -fs -o /dev/null "$url"; do
   i=$((i + 1))

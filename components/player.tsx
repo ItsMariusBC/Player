@@ -1,5 +1,7 @@
 // components/player.tsx
-import { LogoutLink } from "@/components/logout-link";
+import { CornerActions } from "@/components/corner-actions";
+import { AdminPanel } from "@/components/admin-panel";
+import { useSessionInfo } from "@/components/auth-gate";
 import { useCallback, useEffect, useState, MouseEventHandler } from "react";
 import { Gradient } from "@/components/gradient";
 import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
@@ -28,6 +30,11 @@ export default function MusicPlayer() {
   // Expanded visualizer: the rest of the UI is unmounted, only the shader stays.
   const [visualizerExpanded, setVisualizerExpanded] = useState(false);
   const closeVisualizer = useCallback(() => setVisualizerExpanded(false), []);
+  // Admin panel: unmounts the rest of the UI the same way.
+  const { role } = useSessionInfo();
+  const [adminOpen, setAdminOpen] = useState(false);
+  const closeAdmin = useCallback(() => setAdminOpen(false), []);
+  const focusMode = visualizerExpanded || adminOpen;
 
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
@@ -121,7 +128,9 @@ export default function MusicPlayer() {
           className="relative min-h-svh flex items-center px-6 py-8 z-2 text-purple-100 md:p-12"
           onMouseDown={onClick}
         >
-          {visualizerExpanded ? (
+          {adminOpen ? (
+            <AdminPanel onClose={closeAdmin} />
+          ) : visualizerExpanded ? (
             <VisualizerStage analyser={runtime.music.analyser} onClose={closeVisualizer} />
           ) : (
           <div className="w-full max-w-6xl mx-auto">
@@ -161,18 +170,18 @@ export default function MusicPlayer() {
             <Gradient colors={gradient} />
           </m.div>
           
-          {!visualizerExpanded && (
+          {!focusMode && (
             <>
               <NowPlaying music={runtime.music} />
               <UpNext music={runtime.music} />
-              <LogoutLink />
+              <CornerActions isAdmin={role === "admin"} onOpenAdmin={() => setAdminOpen(true)} />
             </>
           )}
           <ProgressBar music={runtime.music} playback={runtime.playback} />
 
           {/* Mini-player */}
           <AnimatePresence>
-            {showMiniPlayer && !visualizerExpanded && (
+            {showMiniPlayer && !focusMode && (
               <MiniPlayer music={runtime.music} playback={runtime.playback} />
             )}
           </AnimatePresence>

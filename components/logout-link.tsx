@@ -1,23 +1,14 @@
 // components/logout-link.tsx
-// Bottom-left bare link mirroring UpNext's style; ends the server session.
-import { logout } from "@/lib/api";
+// Bare link mirroring UpNext's style; ends the server session. Positioned by CornerActions.
+import { performLogout } from "@/lib/api";
 
 export function LogoutLink() {
-  const onLogout = async () => {
-    try {
-      const { redirect } = await logout();
-      window.location.assign(redirect);
-    } catch (error) {
-      console.error("Logout failed", error);
-    }
-  };
-
   return (
-    <div className="fixed left-3 bottom-3 z-30 md:left-4 md:bottom-4">
+    <>
       <button
         type="button"
         aria-label="Se déconnecter"
-        onClick={onLogout}
+        onClick={() => void performLogout()}
         className="pointer-events-auto flex items-center gap-2 rounded-md text-sm text-purple-200/70 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-colors hover:text-purple-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60"
       >
         <svg
@@ -37,6 +28,6 @@ export function LogoutLink() {
         </svg>
         <span>Se déconnecter</span>
       </button>
-    </div>
+    </>
   );
 }

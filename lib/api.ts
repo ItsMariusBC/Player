@@ -52,6 +52,16 @@ export function logout(): Promise<{ redirect: string }> {
   return api<{ redirect: string }>("/api/auth/logout", { method: "POST" });
 }
 
+// Ends the server session then leaves for the provider's end_session URL.
+export async function performLogout(): Promise<void> {
+  try {
+    const { redirect } = await logout();
+    window.location.assign(redirect);
+  } catch (error) {
+    console.error("Logout failed", error);
+  }
+}
+
 export function redirectToLogin(): void {
   window.location.assign("/api/auth/login");
 }

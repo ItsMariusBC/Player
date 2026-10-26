@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { createApp } from "../src/app.ts";
+import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
 import { loadConfig } from "../src/config.ts";
@@ -12,6 +12,12 @@ export interface TestAppOptions {
   accounts?: Record<string, FakeAccount>;
   staticDir?: string;
   env?: Record<string, string>;
+  mount?: AppDeps["mount"];
+}
+
+export interface LogEntry {
+  event: string;
+  data?: Record<string, unknown>;
 }
 
 export const SESSION_COOKIE = "player_session";
@@ -47,7 +53,16 @@ export function createTestApp(opts: TestAppOptions = {}) {
     now = new Date(now.getTime() + ms);
   };
 
-  const app = createApp({ config, db, oidc, now: clock, staticDir: opts.staticDir });
+  const log: LogEntry[] = [];
+  const app = createApp({
+    config,
+    db,
+    oidc,
+    now: clock,
+    staticDir: opts.staticDir,
+    mount: opts.mount,
+    log: (event, data) => log.push({ event, data }),
+  });
 
   /** Creates the user and a session directly in the database, returns the Cookie header value. */
   function loginAs(accountId: string): string {
@@ -81,5 +96,5 @@ export function createTestApp(opts: TestAppOptions = {}) {
     return `${SESSION_COOKIE}=${session.id}`;
   }
 
-  return { app, db, oidc, accounts, config, now: clock, advance, loginAs };
+  return { app, db, oidc, accounts, config, now: clock, advance, loginAs, log };
 }

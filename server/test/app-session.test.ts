@@ -160,3 +160,79 @@ describe("app", () => {
     assert.equal(((await res.json()) as { error: { code: string } }).error.code, "csrf");
   });
 });
+
+describe("no_group body", () => {
+  it("carries the account display name next to the error", async () => {
+    const t = createTestApp();
+    const res = await t.app.request("/api/session", { headers: { cookie: t.loginAs("nobody") } });
+    assert.equal(res.status, 403);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+      user: { displayName: string };
+    };
+    assert.equal(body.error.code, "no_group");
+    assert.equal(typeof body.error.message, "string");
+    assert.equal(body.user.displayName, "Nobody Test");
+  });
+});
+
+describe("missing groups claim", () => {
+  it("logs auth.groups_claim_missing after a refresh without the claim", async () => {
+    const t = createTestApp();
+    const cookie = t.loginAs("user");
+    delete t.accounts.user!.claims.groups;
+    t.advance(16 * MINUTE);
+    const res = await t.app.request("/api/session", { headers: { cookie } });
+    assert.equal(res.status, 403);
+    const entry = t.log.find((e) => e.event === "auth.groups_claim_missing");
+    assert.ok(entry);
+    assert.equal(entry.data?.claim, "groups");
+    assert.equal(typeof entry.data?.userId, "string");
+    assert.ok(!JSON.stringify(entry).includes("fake-rt"));
+  });
+});
+
+describe("shared refresh lock", () => {
+  it("runs a single refresh for concurrent requests on two protected routes", async () => {
+    const t = createTestApp({
+      mount: (app, session) => {
+        app.get("/api/other", session, (c) => c.json({ ok: true }));
+      },
+    });
+    const cookie = t.loginAs("user");
+    const original = t.oidc.refresh;
+    let calls = 0;
+    t.oidc.refresh = async (token) => {
+      calls += 1;
+      return original(token);
+    };
+    t.advance(16 * MINUTE);
+    const [a, b] = await Promise.all([
+      t.app.request("/api/session", { headers: { cookie } }),
+      t.app.request("/api/other", { headers: { cookie } }),
+    ]);
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.equal(calls, 1);
+  });
+});
+
+describe("unhandled errors", () => {
+  it("answers 500 with the JSON envelope and security headers", async () => {
+    const t = createTestApp({
+      mount: (app) => {
+        app.get("/api/boom", () => {
+          throw new Error("secret detail");
+        });
+      },
+    });
+    const res = await t.app.request("/api/boom");
+    assert.equal(res.status, 500);
+    const text = await res.text();
+    assert.ok(!text.includes("secret detail"));
+    assert.equal((JSON.parse(text) as { error: { code: string } }).error.code, "internal_error");
+    assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(res.headers.get("x-frame-options"), "DENY");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+  });
+});

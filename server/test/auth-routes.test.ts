@@ -198,3 +198,35 @@ describe("auth routes", () => {
     assert.match(cleared, /Max-Age=0/i);
   });
 });
+
+describe("login unavailable", () => {
+  it("answers 502 oidc_unavailable and logs when startLogin rejects", async () => {
+    const t = createTestApp();
+    t.oidc.startLogin = async () => {
+      throw new Error("idp down");
+    };
+    const res = await t.app.request("/api/auth/login");
+    assert.equal(res.status, 502);
+    assert.equal(
+      ((await res.json()) as { error: { code: string } }).error.code,
+      "oidc_unavailable",
+    );
+    assert.ok(t.log.some((e) => e.event === "auth.login_unavailable"));
+  });
+});
+
+describe("callback with a missing groups claim", () => {
+  it("logs auth.groups_claim_missing and still opens the session", async () => {
+    const t = createTestApp();
+    delete t.accounts.user!.claims.groups;
+    const { oidcCookie } = await startLogin(t);
+    const res = await t.app.request("/api/auth/callback?code=user&state=fake-state", {
+      headers: { cookie: oidcCookie },
+    });
+    assert.equal(res.status, 302);
+    const entry = t.log.find((e) => e.event === "auth.groups_claim_missing");
+    assert.ok(entry);
+    assert.equal(entry.data?.claim, "groups");
+    assert.equal(count(t, "sessions"), 1);
+  });
+});

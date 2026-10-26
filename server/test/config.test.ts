@@ -63,4 +63,27 @@ describe("loadConfig", () => {
     });
     assert.equal(config.session.secret.length, 32);
   });
+
+  it("refuses DEV_BYPASS_LOGIN with an https APP_URL", () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...minimal,
+          NODE_ENV: "development",
+          APP_URL: "https://player.example",
+          DEV_BYPASS_LOGIN: "true",
+        }),
+      (error) => error instanceof ConfigError && error.message.includes("DEV_BYPASS_LOGIN"),
+    );
+  });
+
+  it("accepts DEV_BYPASS_LOGIN with an http APP_URL", () => {
+    const config = loadConfig({
+      ...minimal,
+      NODE_ENV: "development",
+      APP_URL: "http://localhost:3000",
+      DEV_BYPASS_LOGIN: "true",
+    });
+    assert.equal(config.devBypass, true);
+  });
 });

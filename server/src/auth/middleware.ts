@@ -31,9 +31,12 @@ function profileFrom(claims: Record<string, unknown>) {
 }
 
 // Loads the session, rechecks groups against the IdP when due and sets session, user, role.
+// Call this once per app and reuse the returned middleware on every protected route.
 export function requireSession(deps: AuthDeps) {
   const { config, db, oidc, log } = deps;
   // One refresh per session at a time: rotating refresh tokens break on parallel use.
+  // This map lives per factory call: instantiating the middleware per route would give each
+  // route its own lock, so parallel requests on two routes could refresh the same token twice.
   const inFlight = new Map<string, Promise<UserRecord>>();
 
   function refreshOnce(session: SessionRecord, user: UserRecord, now: Date): Promise<UserRecord> {
@@ -58,6 +61,9 @@ export function requireSession(deps: AuthDeps) {
       throw new Error("refreshed claims do not match the session user");
     }
     const resolution = resolveRole(tokens.claims, config.oidc);
+    if (resolution.reason === "missing_claim") {
+      log?.("auth.groups_claim_missing", { claim: config.oidc.groupsClaim, userId: user.id });
+    }
     const updated = upsertUser(
       db,
       { issuer: user.issuer, ...profileFrom(tokens.claims), groups: resolution.groups },
@@ -115,7 +121,16 @@ export function requireSession(deps: AuthDeps) {
     const resolution = resolveRole({ [config.oidc.groupsClaim]: currentUser.groups }, config.oidc);
     if (resolution.role === null) {
       log?.("role.denied", { userId: currentUser.id, reason: resolution.reason });
-      return jsonError(c, 403, "no_group", "Your account is not allowed to use this application");
+      return c.json(
+        {
+          error: {
+            code: "no_group",
+            message: "Your account is not allowed to use this application",
+          },
+          user: { displayName: currentUser.displayName },
+        },
+        403,
+      );
     }
     c.set("session", current);
     c.set("user", currentUser);

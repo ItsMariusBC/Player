@@ -48,7 +48,14 @@ export function authRoutes(deps: AuthDeps) {
   const app = new Hono();
 
   app.get("/login", async (c) => {
-    const { url, state, nonce, codeVerifier } = await oidc.startLogin(redirectUri());
+    let login;
+    try {
+      login = await oidc.startLogin(redirectUri());
+    } catch (err) {
+      log?.("auth.login_unavailable", { error: err instanceof Error ? err.name : "unknown" });
+      return jsonError(c, 502, "oidc_unavailable", "Identity provider unavailable");
+    }
+    const { url, state, nonce, codeVerifier } = login;
     const payload: OidcCookie = { state, nonce, codeVerifier, createdAt: now().toISOString() };
     setCookie(c, OIDC_COOKIE, seal(JSON.stringify(payload), config.session.secret), {
       httpOnly: true,
@@ -88,7 +95,7 @@ export function authRoutes(deps: AuthDeps) {
     const claims = tokens.claims;
     if (typeof claims.sub !== "string") return invalid();
 
-    const { groups } = resolveRole(claims, config.oidc);
+    const { groups, reason } = resolveRole(claims, config.oidc);
     const user = upsertUser(
       db,
       {
@@ -105,6 +112,9 @@ export function authRoutes(deps: AuthDeps) {
       },
       now(),
     );
+    if (reason === "missing_claim") {
+      log?.("auth.groups_claim_missing", { claim: config.oidc.groupsClaim, userId: user.id });
+    }
     const session = createSession(
       db,
       config.session.secret,

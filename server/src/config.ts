@@ -102,18 +102,22 @@ function parseAppUrl(raw: string, nodeEnv: AppConfig["nodeEnv"]): URL {
   return url;
 }
 
-function parseDevBypass(env: Env, nodeEnv: AppConfig["nodeEnv"]): boolean {
+function parseDevBypass(env: Env, nodeEnv: AppConfig["nodeEnv"], appUrl: URL): boolean {
   const enabled = optional(env, "DEV_BYPASS_LOGIN", "false") === "true";
   if (enabled && nodeEnv === "production") {
     throw new ConfigError("DEV_BYPASS_LOGIN=true is refused when NODE_ENV=production");
+  }
+  if (enabled && appUrl.protocol === "https:") {
+    throw new ConfigError("DEV_BYPASS_LOGIN=true is only allowed with an http:// APP_URL");
   }
   return enabled;
 }
 
 export function loadConfig(env: Env): AppConfig {
   const nodeEnv = parseNodeEnv(env);
+  const appUrl = parseAppUrl(required(env, "APP_URL"), nodeEnv);
   return {
-    appUrl: parseAppUrl(required(env, "APP_URL"), nodeEnv),
+    appUrl,
     port: parsePort(env),
     dataDir: optional(env, "DATA_DIR", "/data"),
     nodeEnv,
@@ -131,6 +135,6 @@ export function loadConfig(env: Env): AppConfig {
       groupsRecheckMs: GROUPS_RECHECK_MS,
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
-    devBypass: parseDevBypass(env, nodeEnv),
+    devBypass: parseDevBypass(env, nodeEnv, appUrl),
   };
 }

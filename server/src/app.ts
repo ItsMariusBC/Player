@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
@@ -15,6 +16,8 @@ export interface AppDeps {
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
+  // Test seam: mounts extra routes behind the shared session middleware, before the API 404.
+  mount?: (app: Hono<AuthEnv>, session: MiddlewareHandler<AuthEnv>) => void;
 }
 
 export function createApp(deps: AppDeps) {
@@ -30,6 +33,11 @@ export function createApp(deps: AppDeps) {
     if (c.req.path.startsWith("/api/")) c.header("Cache-Control", "no-store");
   });
 
+  app.onError((err, c) => {
+    deps.log?.("server.unhandled_error", { error: err instanceof Error ? err.name : "unknown" });
+    return jsonError(c, 500, "internal_error", "Unexpected server error");
+  });
+
   app.get("/healthz", (c) => c.text("ok\n"));
 
   app.use("/api/*", requireRequestedWith);
@@ -38,7 +46,10 @@ export function createApp(deps: AppDeps) {
 
   if (deps.config.devBypass) mountDevBypass(app, auth);
 
-  app.get("/api/session", requireSession(auth), (c) => {
+  // Built once: the refresh lock lives inside this instance and must cover every protected route.
+  const session = requireSession(auth);
+
+  app.get("/api/session", session, (c) => {
     const user = c.get("user");
     return c.json({
       user: { id: user.id, displayName: user.displayName },
@@ -46,6 +57,8 @@ export function createApp(deps: AppDeps) {
       expiresAt: c.get("session").expiresAt.toISOString(),
     });
   });
+
+  deps.mount?.(app, session);
 
   // Unknown API paths must never reach the SPA fallback.
   app.all("/api/*", (c) => jsonError(c, 404, "not_found", "Unknown API route"));

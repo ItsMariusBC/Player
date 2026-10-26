@@ -37,7 +37,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(response.status, code, message);
   }
 
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError(response.status, "bad_response", "Réponse inattendue du serveur");
+  }
 }
 
 export function fetchSession(): Promise<SessionInfo> {
@@ -50,4 +54,22 @@ export function logout(): Promise<{ redirect: string }> {
 
 export function redirectToLogin(): void {
   window.location.assign("/api/auth/login");
+}
+
+// Dev-only login bypass (see server/src/dev-bypass.ts). Any failure means "not available".
+export async function fetchDevBypassStatus(): Promise<boolean> {
+  try {
+    const { bypass } = await api<{ bypass?: boolean }>("/api/dev/status");
+    return bypass === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function devLoginAs(role: "admin" | "user"): Promise<void> {
+  await api<{ role: string }>("/api/dev/login-as", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
 }

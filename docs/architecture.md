@@ -75,6 +75,8 @@ Pour tester la connexion, ouvrir `http://localhost:3000/api/auth/login` puis se 
 
 `GET /api/session` renvoie ensuite le rôle déduit des groupes.
 
+Quand `DEV_BYPASS_LOGIN=true` (activé dans `.env.development`), l'écran de connexion de test propose « Entrer en admin » et « Entrer en user », qui ouvrent une session sans passer par le fournisseur OIDC, avec les identités `dev-admin` / `dev-user` (émetteur `dev-bypass`). Ces sessions ne sont pas revérifiées auprès du fournisseur. Le serveur refuse de démarrer si `DEV_BYPASS_LOGIN=true` avec `NODE_ENV=production`.
+
 Le fournisseur factice expose des routes de contrôle : `GET /mock/accounts` liste l'état des comptes, et `POST /mock/accounts/:id` avec un corps JSON `{ "groups": [...], "disabled": true }` modifie les groupes ou désactive un compte (le prochain rafraîchissement de session échoue). Exemple :
 
 ```sh

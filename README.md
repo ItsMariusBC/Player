@@ -13,6 +13,8 @@ yarn dev
 
 `yarn dev` lance en parallèle Vite (`http://localhost:3000`), l'API (configurée par `.env.development`, versionné, sans secret réel) et un fournisseur OIDC factice sur le port 3002. Trois comptes de test, à choisir sur l'écran de connexion factice : `admin@test` (groupe admin), `user@test` (groupe users) et `nobody@test` (aucun groupe, accès refusé). `yarn.lock` est le seul lockfile du projet.
 
+Quand `DEV_BYPASS_LOGIN=true` (activé dans `.env.development`), l'écran de connexion de test propose « Entrer en admin » et « Entrer en user », qui ouvrent une session sans passer par le fournisseur OIDC, avec les identités `dev-admin` / `dev-user` (émetteur `dev-bypass`). Ces sessions ne sont pas revérifiées auprès du fournisseur. Le serveur refuse de démarrer si `DEV_BYPASS_LOGIN=true` avec `NODE_ENV=production`.
+
 ```sh
 yarn validate
 yarn playwright install chromium

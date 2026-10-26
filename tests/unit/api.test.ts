@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, fetchDevBypassStatus } from "../../lib/api";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -39,5 +39,34 @@ describe("api", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(401);
     expect((err as ApiError).code).toBe("session_expired");
+  });
+
+  test("rejects a 200 with a non-JSON body as bad_response", async () => {
+    globalThis.fetch = (async () =>
+      new Response("<html>", { status: 200 })) as unknown as typeof fetch;
+    const err = await api("/api/session").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe("bad_response");
+  });
+
+  test("rejects a 502 text body with an ApiError", async () => {
+    globalThis.fetch = (async () =>
+      new Response("Bad Gateway", { status: 502 })) as unknown as typeof fetch;
+    const err = await api("/api/session").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(502);
+    expect((err as ApiError).code.length).toBeGreaterThan(0);
+  });
+});
+
+describe("fetchDevBypassStatus", () => {
+  test("is false on 404", async () => {
+    stubFetch(404, { error: { code: "not_found", message: "no" } });
+    expect(await fetchDevBypassStatus()).toBe(false);
+  });
+
+  test("is true on 200", async () => {
+    stubFetch(200, { bypass: true });
+    expect(await fetchDevBypassStatus()).toBe(true);
   });
 });

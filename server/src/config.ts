@@ -17,6 +17,8 @@ export interface AppConfig {
     groupsRecheckMs: number;
   };
   trustProxy: boolean;
+  /** Dev-only login bypass, always false in production. */
+  devBypass: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -100,6 +102,14 @@ function parseAppUrl(raw: string, nodeEnv: AppConfig["nodeEnv"]): URL {
   return url;
 }
 
+function parseDevBypass(env: Env, nodeEnv: AppConfig["nodeEnv"]): boolean {
+  const enabled = optional(env, "DEV_BYPASS_LOGIN", "false") === "true";
+  if (enabled && nodeEnv === "production") {
+    throw new ConfigError("DEV_BYPASS_LOGIN=true is refused when NODE_ENV=production");
+  }
+  return enabled;
+}
+
 export function loadConfig(env: Env): AppConfig {
   const nodeEnv = parseNodeEnv(env);
   return {
@@ -121,5 +131,6 @@ export function loadConfig(env: Env): AppConfig {
       groupsRecheckMs: GROUPS_RECHECK_MS,
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
+    devBypass: parseDevBypass(env, nodeEnv),
   };
 }

@@ -1,6 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import type { DatabaseSync } from "node:sqlite";
 import type { AppConfig } from "../config.ts";
+import { DEV_BYPASS_ISSUER } from "../dev-bypass.ts";
 import { clearSessionCookie, jsonError, readSessionCookie } from "../http.ts";
 import { hashSessionId } from "../crypto.ts";
 import type { OidcAdapter } from "./oidc.ts";
@@ -91,7 +92,12 @@ export function requireSession(deps: AuthDeps) {
 
     let current = session;
     let currentUser = user;
-    if (now.getTime() - session.groupsCheckedAt.getTime() >= config.session.groupsRecheckMs) {
+    // Dev-bypass sessions hold no refresh token, so there is nothing to recheck.
+    const skipRecheck = config.devBypass && user.issuer === DEV_BYPASS_ISSUER;
+    if (
+      !skipRecheck &&
+      now.getTime() - session.groupsCheckedAt.getTime() >= config.session.groupsRecheckMs
+    ) {
       try {
         currentUser = await refreshOnce(session, user, now);
         current = { ...session, groupsCheckedAt: now };

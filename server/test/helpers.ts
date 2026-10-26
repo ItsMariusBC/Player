@@ -11,6 +11,7 @@ export interface TestAppOptions {
   appUrl?: string;
   accounts?: Record<string, FakeAccount>;
   staticDir?: string;
+  env?: Record<string, string>;
 }
 
 export const SESSION_COOKIE = "player_session";
@@ -23,6 +24,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     OIDC_CLIENT_ID: "client-id",
     OIDC_CLIENT_SECRET: "client-secret",
     SESSION_SECRET: "ab".repeat(32),
+    ...opts.env,
   });
   const accounts: Record<string, FakeAccount> = opts.accounts ?? {
     admin: {

@@ -6,14 +6,14 @@ La structure reprend [celle du site Clyse](https://github.com/Clyse-Devs/clyse.d
 
 Chaque push sur `developpment` ou `production`, tag `v*`, PR vers ces branches, lancement manuel et contrôle hebdomadaire exécute toute la pipeline. Les PR obsolètes sont annulées. Les exécutions de branche restent actives.
 
-| Étape       | Contrôles                                                                                                                               |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript, actionlint, ShellCheck                                                      |
-| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                 |
-| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                         |
-| Test        | Tests Bun du formatage des durées, Playwright sur le build récupéré : montage du lecteur/catalogue et lecture HTTP partielle des médias |
-| Deploy      | Hadolint, validation Compose, construction de l’image, démarrage avec healthcheck, HTTP et Range vérifiés dans le conteneur non-root    |
-| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                        |
+| Étape       | Contrôles                                                                                                                                                                                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript (front et `server/`), actionlint, ShellCheck (`scripts/ci`, `scripts/e2e`)                                                                                                                                      |
+| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                                                                                                                                                    |
+| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                                                                                                                                                            |
+| Test        | Tests Bun, tests Node du serveur (`yarn test:server`), Playwright sur le `dist/` récupéré (`PLAYER_SKIP_BUILD=1`) derrière le mock OIDC : montage, lecture partielle des médias, connexion et déconnexion                                                                  |
+| Deploy      | Hadolint, mock OIDC sur l'hôte, Compose avec `docker-compose.ci.yml` (variables OIDC de développement), image, healthcheck, puis `stack-check.sh` : `/healthz`, HTML, `/api/session` 401, `/api/auth/login` 302 vers le mock, 404, Range, uid 101, `/app` en lecture seule |
+| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                                                                                                                                                           |
 
 Lint et scans démarrent ensemble. Build et validation Docker attendent le lint ; les tests attendent le build. Les rapports JUnit, traces Playwright et SBOM sont gardés 14 jours. Les sorties sont privées, rattachées au run GitHub.
 
@@ -28,25 +28,29 @@ Les tests initiaux sont des contrôles ciblés du socle existant. Ils ne constit
 ```sh
 yarn install --frozen-lockfile --non-interactive
 yarn validate
+yarn test:server
 yarn playwright install chromium
 yarn test:e2e
 actionlint
-shellcheck scripts/ci/*.sh
+shellcheck scripts/ci/*.sh scripts/e2e/*.sh
 sh scripts/ci/gitleaks.sh
 ```
 
 Les scans Trivy se reproduisent avec l’image et les commandes de `scan.yml`. Le scan des licences examine aussi les dépendances installées. Aucune exception de vulnérabilité ni de secret n’est configurée.
 
-Pour valider Docker sans publier de port :
+Pour valider la pile Docker, lancer le mock OIDC sur l'hôte (ports 3002 et 8080 libres), puis :
 
 ```sh
-COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check docker compose build
-COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check docker compose up -d --wait
-COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check sh scripts/ci/stack-check.sh
-COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check docker compose down --volumes --remove-orphans --rmi local
+MOCK_OIDC_ISSUER=http://host.docker.internal:3002 node server/dev/mock-oidc.ts &
+export COMPOSE_FILE=docker-compose.yml:docker-compose.ci.yml COMPOSE_PROJECT_NAME=player-check IMAGE_TAG=check
+docker compose build
+docker compose up -d --wait --wait-timeout 180
+sh scripts/ci/stack-check.sh
+docker compose down --volumes --remove-orphans --rmi local
+kill %1
 ```
 
-La CI emploie un nom de projet et un tag d’image propres à chaque run ; le nettoyage ne touche que cette pile.
+`docker-compose.ci.yml` ne contient que des valeurs de développement (client `player-dev`, secret de session fixe) : aucun secret réel. Il publie le port sur `127.0.0.1:8080` et ajoute `host.docker.internal` pour joindre le mock depuis le conteneur, y compris sur Linux. La CI emploie un nom de projet et un tag d’image propres à chaque run ; le nettoyage ne touche que cette pile.
 
 ## Déploiement
 
@@ -105,3 +109,5 @@ Le [premier run GitHub](https://github.com/ItsMariusBC/Player/actions/runs/40363
 La variable de dépôt `CI_RUNNER_LABELS` permet de choisir des labels JSON, par exemple `["self-hosted", "linux", "player"]`. Sans cette variable, les jobs utilisent `["ubuntu-24.04"]`. Un runner personnel Linux dédié doit disposer de Docker Compose, Node compatible avec les actions et des outils standard Ubuntu ; le setup installe Node, Bun et Yarn. Les runners de l’organisation Clyse ne peuvent pas être affectés directement à un dépôt personnel : un runner propre à Player doit être enregistré.
 
 L’import initial de la configuration est validé localement. Les protections sont actives pour les changements suivants ; le blocage de facturation ne donne pas lieu à un statut CI artificiellement réussi.
+
+Les workflows mis à jour pour le serveur (tests Node, e2e derrière le mock, contrôles de pile avec OIDC) n'ont été vérifiés qu'en local (actionlint, ShellCheck, `yarn validate`, `yarn test:e2e`, pile Compose). Ils restent non vérifiés à distance tant que le blocage de facturation dure.

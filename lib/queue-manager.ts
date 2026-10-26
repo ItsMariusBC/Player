@@ -9,6 +9,22 @@ export interface QueueItem extends Song {
   id: number;
 }
 
+export type TrackDirection = "next" | "previous" | "jump";
+
+/**
+ * Infers how the queue moved between two indexes, wrap-around included.
+ */
+export function getTrackDirection(
+  previousIndex: number,
+  nextIndex: number,
+  length: number,
+): TrackDirection {
+  if (length < 2) return "jump";
+  if (nextIndex === (previousIndex + 1) % length) return "next";
+  if (nextIndex === (previousIndex - 1 + length) % length) return "previous";
+  return "jump";
+}
+
 export interface QueueManagerOptions {
   onUpdate?: (song: QueueItem | undefined) => void;
   onSongListUpdated?: (songs: QueueItem[]) => void;

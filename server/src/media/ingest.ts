@@ -20,9 +20,10 @@ export interface IngestInput {
   artist?: string;
   /** Used when neither an explicit title nor a tag exists. */
   fallbackTitle?: string;
-  folderId?: string | null;
-  /** Explicit cover wins over the embedded one. */
-  cover?: ProbeResult["cover"];
+  /** Lazy: called only once the file is known to be new, so duplicates have no side effects. */
+  folderId?: () => string | null;
+  /** Lazy, same rule. An explicit cover (non-null) wins over the embedded one. */
+  cover?: () => Promise<ProbeResult["cover"]>;
   now: Date;
 }
 
@@ -48,7 +49,8 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
     await storage.removeIncoming(importId);
     return { kind: "duplicate", trackId: existing.id };
   }
-  const cover = input.cover ?? probe.cover;
+  const cover = (await input.cover?.()) ?? probe.cover;
+  const folderId = input.folderId?.() ?? null;
   const trackId = crypto.randomUUID();
   await storage.publish(importId, trackId, file, probe.format, cover);
   try {
@@ -56,7 +58,7 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
       db,
       {
         id: trackId,
-        folderId: input.folderId ?? null,
+        folderId,
         title: input.title ?? probe.title ?? input.fallbackTitle ?? "Untitled",
         artist: input.artist ?? probe.artist ?? "",
         album: probe.album ?? "",
@@ -72,6 +74,17 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
     return { kind: "ready", track };
   } catch (error) {
     await storage.removeTrack(trackId);
+    // Another process (for example the migration script) inserted the same file meanwhile.
+    if (
+      (error as { code?: unknown }).code === "ERR_SQLITE_ERROR" &&
+      /UNIQUE/i.test(String((error as Error).message))
+    ) {
+      const winner = findTrackBySha(db, probe.sha256);
+      if (winner) {
+        await storage.removeIncoming(importId);
+        return { kind: "duplicate", trackId: winner.id };
+      }
+    }
     throw error;
   }
 }

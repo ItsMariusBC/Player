@@ -175,3 +175,15 @@ describe("migrateCatalog", () => {
     assert.equal(track!.coverExt, null);
   });
 });
+
+describe("migrateCatalog duplicates", () => {
+  it("does not create the folder of a duplicate file", async () => {
+    writeWav(path.join(source, "a.wav"), 1);
+    await run();
+    mkdirSync(path.join(source, "NewDir"));
+    writeWav(path.join(source, "NewDir", "copy.wav"), 1);
+    const report = await run();
+    assert.equal(report.skipped, 2);
+    assert.deepEqual(listFolders(db), []);
+  });
+});

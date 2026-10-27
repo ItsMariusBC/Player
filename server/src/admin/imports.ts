@@ -94,7 +94,8 @@ export function createImportQueue(deps: {
 
   return {
     enqueue(importId) {
-      chain = chain.then(() => run(importId));
+      // run() handles its own errors; the catch keeps the chain alive if even that throws.
+      chain = chain.then(() => run(importId)).catch(() => {});
     },
     idle() {
       return chain;

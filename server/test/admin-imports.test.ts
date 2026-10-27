@@ -162,3 +162,45 @@ describe("admin imports", () => {
     assert.equal(res.status, 400);
   });
 });
+
+describe("ingestFile race", () => {
+  it("reports duplicate when the unique constraint fires after the dedupe check", async () => {
+    t = createTestApp();
+    const { ingestFile } = await import("../src/media/ingest.ts");
+    const { insertTrack } = await import("../src/catalog/tracks.ts");
+    const { probeFile } = await import("../src/media/probe.ts");
+    const file = path.join(t.storage.incomingDir("race"), "upload.bin");
+    writeWav(file, 1);
+    const sha = (await probeFile(file)).sha256;
+    // The folder resolver runs between the dedupe check and the insert: slip the rival row in there.
+    const result = await ingestFile({
+      db: t.db,
+      storage: t.storage,
+      importId: "race",
+      file,
+      now: t.now(),
+      folderId: () => {
+        insertTrack(
+          t.db,
+          {
+            id: "rival",
+            folderId: null,
+            title: "r",
+            artist: "",
+            album: "",
+            durationMs: null,
+            format: "wav",
+            sizeBytes: 1,
+            sha256: sha,
+            coverExt: null,
+            status: "ready",
+          },
+          t.now(),
+        );
+        return null;
+      },
+    });
+    assert.deepEqual(result, { kind: "duplicate", trackId: "rival" });
+    assert.ok(!existsSync(path.join(t.tempDir, "incoming", "race")));
+  });
+});

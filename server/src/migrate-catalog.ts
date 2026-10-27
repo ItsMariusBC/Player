@@ -130,8 +130,8 @@ export async function migrateCatalog(input: {
         title: entry?.name,
         artist: entry?.author,
         fallbackTitle: path.basename(file, path.extname(file)),
-        folderId: folderPath === "." ? null : resolveFolder(folderPath),
-        cover: await readPicture(sourceDir, entry?.picture),
+        folderId: () => (folderPath === "." ? null : resolveFolder(folderPath)),
+        cover: () => readPicture(sourceDir, entry?.picture),
         now,
       });
       if (result.kind === "duplicate") {

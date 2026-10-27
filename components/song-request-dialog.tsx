@@ -42,6 +42,9 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
   const [cooling, setCooling] = useState(false);
   // Read during the first render, before the dialog moves the focus into itself.
   const [returnTarget] = useState(() => document.activeElement as HTMLElement | null);
+  // StrictMode mounts, cleans up and re-mounts the effect below within the same task: the
+  // focus must only go back to the opener on the real unmount, so teardown waits a microtask.
+  const mountedRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -91,6 +94,7 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
   // gives the focus back to the opener.
   useEffect(() => {
     const loadController = new AbortController();
+    mountedRef.current = true;
     inputRef.current?.focus();
     listMyRequests()
       .then((list) => {
@@ -102,10 +106,12 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
         setRequestsError(requestErrorMessage(error));
       });
     return () => {
+      mountedRef.current = false;
       loadController.abort();
-      controllerRef.current?.abort();
-      if (coolingTimer.current) clearTimeout(coolingTimer.current);
       queueMicrotask(() => {
+        if (mountedRef.current) return;
+        controllerRef.current?.abort();
+        if (coolingTimer.current) clearTimeout(coolingTimer.current);
         if (returnTarget?.isConnected) returnTarget.focus();
       });
     };
@@ -226,7 +232,11 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
             maxLength={200}
             value={query}
             className={inputClass}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              // Typing a new title drops the proposal, so « Demander » sends what is typed.
+              setQuery(event.target.value);
+              setSelectedId(null);
+            }}
           />
           <button
             type="submit"

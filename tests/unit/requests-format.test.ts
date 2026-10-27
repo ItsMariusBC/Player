@@ -68,6 +68,9 @@ describe("requestErrorMessage", () => {
     expect(requestErrorMessage(new ApiError(404, "proposal_expired", "x"))).toBe(
       "Les propositions ont expiré, relancez la recherche",
     );
+    expect(requestErrorMessage(new ApiError(404, "request_not_found", "x"))).toBe(
+      "Cette demande n'existe plus",
+    );
   });
   test("falls back to the message, then to a generic one", () => {
     expect(requestErrorMessage(new ApiError(500, "internal", "Boom"))).toBe("Boom");

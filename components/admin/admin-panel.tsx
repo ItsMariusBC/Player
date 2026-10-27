@@ -159,17 +159,31 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     [refreshAdmin, onCatalogChanged, showError],
   );
 
-  const acceptOne = (requestId: string) =>
-    void run(async () => {
-      await acceptRequest(requestId);
-      await refreshRequests();
-    });
+  // Request actions only touch the requests list: it is reloaded even when the action fails
+  // (the request may be gone or already handled), and the catalogues stay as they are.
+  const runRequestAction = useCallback(
+    async (action: () => Promise<unknown>) => {
+      setInFlight((n) => n + 1);
+      try {
+        await action();
+      } catch (error) {
+        showError(error);
+      } finally {
+        await refreshRequests();
+        setInFlight((n) => n - 1);
+      }
+    },
+    [refreshRequests, showError],
+  );
 
-  const deleteOne = (requestId: string) =>
-    void run(async () => {
-      await deleteRequest(requestId);
-      await refreshRequests();
-    });
+  const acceptOne = (requestId: string) => void runRequestAction(() => acceptRequest(requestId));
+
+  const deleteOne = (requestId: string) => void runRequestAction(() => deleteRequest(requestId));
+
+  // The list may have changed since the last visit (new requests from the player).
+  useEffect(() => {
+    if (view === "requests") void refreshRequests();
+  }, [view, refreshRequests]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -393,9 +407,13 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
             aria-label="Vue"
             className="flex items-center gap-4"
             onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+              if (!keys.includes(event.key)) return;
               event.preventDefault();
-              const next = view === "catalog" ? "requests" : "catalog";
+              let next: "catalog" | "requests";
+              if (event.key === "Home") next = "catalog";
+              else if (event.key === "End") next = "requests";
+              else next = view === "catalog" ? "requests" : "catalog";
               setView(next);
               document.getElementById(`admin-tab-${next}`)?.focus();
             }}
@@ -412,6 +430,7 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
                 type="button"
                 role="tab"
                 aria-selected={view === key}
+                aria-controls={`admin-panel-${key}`}
                 tabIndex={view === key ? 0 : -1}
                 className={cn(
                   "border-b-2 py-1 text-sm uppercase tracking-widest transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60",
@@ -458,7 +477,12 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       )}
 
       {view === "requests" && (
-        <div role="tabpanel" className="mt-4 min-h-0 flex-1 overflow-y-auto">
+        <div
+          role="tabpanel"
+          id="admin-panel-requests"
+          aria-labelledby="admin-tab-requests"
+          className="mt-4 min-h-0 flex-1 overflow-y-auto"
+        >
           <RequestList
             requests={requests}
             busy={inFlight > 0}
@@ -469,6 +493,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       )}
 
       <div
+        role="tabpanel"
+        id="admin-panel-catalog"
+        aria-labelledby="admin-tab-catalog"
         className={cn(
           "mt-4 min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden",
           view === "catalog" ? "flex" : "hidden",

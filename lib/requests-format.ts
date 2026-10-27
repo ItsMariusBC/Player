@@ -36,6 +36,7 @@ export function pendingCount(list: readonly Pick<SongRequestDto, "status">[]): n
 const ERROR_MESSAGES: Record<string, string> = {
   request_limit: "Vous avez déjà 20 demandes en attente",
   request_duplicate: "Vous avez déjà demandé ce titre",
+  request_not_found: "Cette demande n'existe plus",
   proposal_expired: "Les propositions ont expiré, relancez la recherche",
 };
 

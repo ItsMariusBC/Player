@@ -160,6 +160,8 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
         selected ? { proposalId: selected.id } : { title: query.trim() },
       );
       setRequests((current) => [request, ...(current ?? [])]);
+      setSelectedId(null);
+      setQuery("");
       setSent(true);
     } catch (error) {
       setActionError(requestErrorMessage(error));
@@ -176,6 +178,12 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
       await withdrawRequest(request.id);
       setRequests((current) => current?.filter((item) => item.id !== request.id) ?? null);
     } catch (error) {
+      // The request may be gone or already handled: show the real state next to the error.
+      try {
+        setRequests(await listMyRequests());
+      } catch {
+        // Keep the list as it is; the error below is the one that matters.
+      }
       setActionError(requestErrorMessage(error));
     } finally {
       setWithdrawing((current) => {
@@ -248,7 +256,8 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
         </form>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-          <div aria-live="polite" aria-busy={search.kind === "loading"}>
+          <div>
+            <div aria-live="polite" aria-busy={search.kind === "loading"}>
             {search.kind === "loading" && (
               <p
                 className={cn(
@@ -264,6 +273,7 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
                 {search.message}
               </p>
             )}
+            </div>
             {proposals.length > 0 && (
               <fieldset>
                 <legend className="sr-only">Propositions</legend>
@@ -316,16 +326,18 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
                 </ul>
               </fieldset>
             )}
-            {notice && (
-              <p
-                className={cn(
-                  "text-purple-200/50",
-                  proposals.length === 0 ? "py-4 text-sm" : "pt-2 text-xs",
-                )}
-              >
-                {notice}
-              </p>
-            )}
+            <div aria-live="polite">
+              {notice && (
+                <p
+                  className={cn(
+                    "text-purple-200/50",
+                    proposals.length === 0 ? "py-4 text-sm" : "pt-2 text-xs",
+                  )}
+                >
+                  {notice}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

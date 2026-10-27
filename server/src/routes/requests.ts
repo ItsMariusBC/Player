@@ -21,7 +21,6 @@ export function requestRoutes(
     db: DatabaseSync;
     metadata?: MetadataSearch;
     now: () => Date;
-    log?: (event: string, data?: Record<string, unknown>) => void;
   },
   session: MiddlewareHandler<AuthEnv>,
 ) {

@@ -31,9 +31,34 @@ async function openAdminRequests(page: Page) {
   return dialog;
 }
 
+// Titles created by the scenarios, deleted afterwards even when an assertion failed.
+const createdTitles: string[] = [];
+
+test.afterEach(async ({ browser }) => {
+  const titles = createdTitles.splice(0);
+  if (titles.length === 0) return;
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await loginAs(page, "admin@test");
+    const headers = { "X-Requested-With": "player" };
+    const listed = await page.request.get("/api/admin/requests", { headers });
+    if (!listed.ok()) return;
+    const { requests } = (await listed.json()) as { requests: { id: string; title: string }[] };
+    for (const request of requests.filter((item) => titles.includes(item.title))) {
+      await page.request.delete(`/api/admin/requests/${encodeURIComponent(request.id)}`, {
+        headers,
+      });
+    }
+  } finally {
+    await context.close();
+  }
+});
+
 test("a user requests a song, the admin accepts then deletes it", async ({ page, browser }) => {
   test.setTimeout(90_000);
   const title = unique("Demande");
+  createdTitles.push(title);
 
   // The user types a title and sends it as is (no network: « Demander », not « Rechercher »).
   await loginAs(page, "user@test");

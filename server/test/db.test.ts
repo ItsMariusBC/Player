@@ -104,7 +104,7 @@ describe("song_requests table", () => {
 });
 
 describe("tracks loudness columns", () => {
-  it("are created by migration 4 and accept NULL", () => {
+  it("are created by migrations 4 and 5 and accept NULL", () => {
     const db = openDatabase(":memory:");
     migrate(db);
     const columns = db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[];

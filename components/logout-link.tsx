@@ -1,0 +1,33 @@
+// components/logout-link.tsx
+// Bare link mirroring UpNext's style; ends the server session. Positioned by CornerActions.
+import { performLogout } from "@/lib/api";
+
+export function LogoutLink() {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Se déconnecter"
+        onClick={() => void performLogout()}
+        className="pointer-events-auto flex items-center gap-2 rounded-md text-sm text-purple-200/70 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-colors hover:text-purple-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60"
+      >
+        <svg
+          aria-hidden="true"
+          width={14}
+          height={14}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+        <span>Se déconnecter</span>
+      </button>
+    </>
+  );
+}

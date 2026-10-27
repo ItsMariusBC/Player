@@ -11,6 +11,7 @@ test-results/
 .env.*
 !.env.example
 !.env.*.example
+!.env.development
 *.pem
 *.key
 
@@ -21,3 +22,5 @@ test-results/
 .cache/
 .yarn/
 !.yarn/releases/
+
+.data/

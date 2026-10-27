@@ -15,9 +15,32 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: process.env.PLAYER_TEST_URL
     ? undefined
-    : {
-        command: "yarn preview --host 127.0.0.1 --port 4173 --strictPort",
-        url: "http://127.0.0.1:4173",
-        reuseExistingServer: false,
-      },
+    : [
+        {
+          command: "node server/dev/mock-oidc.ts",
+          url: "http://127.0.0.1:3002/.well-known/openid-configuration",
+          env: { MOCK_OIDC_PORT: "3002" },
+          reuseExistingServer: false,
+          timeout: 60_000,
+        },
+        {
+          command: process.env.PLAYER_SKIP_BUILD
+            ? "sh scripts/e2e/start-server.sh"
+            : "yarn build && sh scripts/e2e/start-server.sh",
+          url: "http://127.0.0.1:4173/healthz",
+          env: {
+            NODE_ENV: "test",
+            APP_URL: "http://127.0.0.1:4173",
+            PORT: "4173",
+            DATA_DIR: "./.data/e2e",
+            OIDC_ISSUER: "http://localhost:3002",
+            OIDC_CLIENT_ID: "player-dev",
+            OIDC_CLIENT_SECRET: "player-dev-secret",
+            SESSION_SECRET: "0123456789abcdef".repeat(4),
+            OIDC_GROUPS_CLAIM: "groups",
+          },
+          reuseExistingServer: false,
+          timeout: 180_000,
+        },
+      ],
 });

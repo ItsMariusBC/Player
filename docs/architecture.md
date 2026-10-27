@@ -2,12 +2,12 @@
 
 Le code est organisé en couches. Une couche ne dépend que de celles situées en dessous.
 
-| Couche       | Fichiers                                                                               | Rôle                                                                                                                                                                                                                                                                         |
-| ------------ | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Moteur       | `lib/music-manager.ts`, `lib/queue-manager.ts`, `lib/storage-manager.ts`               | Élément `<audio>`, `AudioContext`, file de lecture, persistance des titres personnalisés. Émet des `PlayerEvent` (`play`, `pause`, `track`, `time`, `queue`). Ignore l'interface.                                                                                            |
-| Contrôleurs  | `lib/playback-controller.ts`, `lib/notification-manager.ts`, `lib/shortcut-manager.ts` | `PlaybackController` est l'unique point d'entrée des actions (lecture, pause, stop, piste suivante/précédente, seek, volume). `NotificationManager` transforme les événements en une seule notification visible à la fois. `ShortcutManager` relie le clavier au contrôleur. |
-| Composition  | `lib/player-runtime.ts`                                                                | `createPlayerRuntime()` assemble moteur, contrôleurs et raccourcis, et expose `destroy()`. C'est le seul endroit où les instances sont créées.                                                                                                                               |
-| Présentation | `components/**`, `lib/hooks/**`                                                        | Composants React sans logique métier. `usePlaybackState(music)` fournit l'état courant ; les actions passent par `playback`. `useSongGradient(song)` fournit les couleurs du fond.                                                                                           |
+| Couche       | Fichiers                                                                               | Rôle                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Moteur       | `lib/music-manager.ts`, `lib/queue-manager.ts`, `lib/storage-manager.ts`               | Élément `<audio>`, `AudioContext`, file de lecture, persistance des titres personnalisés. Émet des `PlayerEvent` (`play`, `pause`, `track`, `time`, `queue`). Ignore l'interface.                                                                                                                                                                                                |
+| Contrôleurs  | `lib/playback-controller.ts`, `lib/notification-manager.ts`, `lib/shortcut-manager.ts` | `PlaybackController` est l'unique point d'entrée des actions (lecture, pause, stop, piste suivante/précédente, seek, volume). `NotificationManager` transforme les événements en une seule notification visible à la fois. `ShortcutManager` relie le clavier au contrôleur.                                                                                                     |
+| Composition  | `lib/player-runtime.ts`                                                                | `createPlayerRuntime()` assemble moteur, contrôleurs et raccourcis, et expose `destroy()`. C'est le seul endroit où les instances sont créées.                                                                                                                                                                                                                                   |
+| Présentation | `components/**`, `lib/hooks/**`                                                        | Composants React sans logique métier. `usePlaybackState(music)` fournit l'état courant ; les actions passent par `playback`. `useSongGradient(song)` fournit les couleurs du fond. Pour les admins, `AdminButton` s'affiche à côté du lien de déconnexion (`CornerActions`) et ouvre `AdminPanel` (coquille vide, démonte le reste de l'interface comme le visualiseur agrandi). |
 
 ## Règles
 
@@ -60,3 +60,27 @@ Actifs uniquement quand aucun élément n'a le focus.
 | ↑ / ↓  | Piste précédente / suivante        |
 | ← / →  | Reculer / avancer de 5 s           |
 | M      | Afficher / masquer le mini-lecteur |
+
+## Développement
+
+`yarn dev` lance trois processus : Vite (`http://localhost:3000`, qui proxifie `/api` vers l'API), l'API (`http://localhost:8080`, configurée par `.env.development`) et un fournisseur OIDC factice (`http://localhost:3002`, `server/dev/mock-oidc.ts`). Le navigateur ne parle qu'à `:3000` : `APP_URL` vaut donc `http://localhost:3000` et le callback OIDC revient par le proxy.
+
+Pour tester la connexion, ouvrir `http://localhost:3000/api/auth/login` puis se connecter avec l'un des comptes (n'importe quel mot de passe) :
+
+| Compte        | Groupes     |
+| ------------- | ----------- |
+| `admin@test`  | `["admin"]` |
+| `user@test`   | `["users"]` |
+| `nobody@test` | `[]`        |
+
+`GET /api/session` renvoie ensuite le rôle déduit des groupes.
+
+Quand `DEV_BYPASS_LOGIN=true` (activé dans `.env.development`), l'écran de connexion de test propose « Entrer en admin » et « Entrer en user », qui ouvrent une session sans passer par le fournisseur OIDC, avec les identités `dev-admin` / `dev-user` (émetteur `dev-bypass`). Ces sessions ne sont pas revérifiées auprès du fournisseur. Le serveur refuse de démarrer si `DEV_BYPASS_LOGIN=true` avec `NODE_ENV=production`.
+
+Le fournisseur factice expose des routes de contrôle : `GET /mock/accounts` liste l'état des comptes, et `POST /mock/accounts/:id` avec un corps JSON `{ "groups": [...], "disabled": true }` modifie les groupes ou désactive un compte (le prochain rafraîchissement de session échoue). Exemple :
+
+```sh
+curl -X POST localhost:3002/mock/accounts/user@test -H 'content-type: application/json' -d '{"groups":["admin"]}'
+```
+
+`.env.development` est versionné : il ne contient aucun secret réel (clé de session et client OIDC propres au développement). Le dossier `.data/` (données de l'API) est ignoré par git.

@@ -22,7 +22,7 @@
   ],
   "overrides": [
     {
-      "files": ["src/**/*", "components/**/*", "lib/**/*", "music/**/*"],
+      "files": ["src/**/*", "components/**/*", "lib/**/*", "music/**/*", "server/**/*"],
       "rules": {
         "programming/no-em-dash-copy": "error"
       }

@@ -3,6 +3,11 @@ services:
     build: .
     image: player:${IMAGE_TAG:-local}
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ${PLAYER_DATA_PATH:-player-data}:/data
     expose:
       - "8080"
     read_only: true
@@ -12,3 +17,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  player-data: {}

@@ -11,6 +11,7 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: player-ci-${{ github.run_id }}-${{ github.run_attempt }}
       IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -20,14 +21,30 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src
           hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
           /bin/hadolint Dockerfile
-      - run: docker compose config --quiet
-      - run: docker compose build
-      - run: docker compose up -d --wait --wait-timeout 120
-      - name: Contrôler le serveur et les médias
+      - uses: ./.github/actions/setup
+      - name: Démarrer le mock OIDC sur l'hôte
+        run: |
+          MOCK_OIDC_ISSUER=http://host.docker.internal:3002 nohup node server/dev/mock-oidc.ts > mock-oidc.log 2>&1 &
+          echo "MOCK_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            curl -fs -o /dev/null http://127.0.0.1:3002/.well-known/openid-configuration && exit 0
+            sleep 1
+          done
+          cat mock-oidc.log
+          echo "Le mock OIDC ne répond pas." >&2
+          exit 1
+      - run: docker compose -f docker-compose.yml -f docker-compose.ci.yml config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build
+      - run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait --wait-timeout 180
+      - name: Contrôler le serveur, l'authentification et les médias
         run: sh scripts/ci/stack-check.sh
       - name: Journaux Docker
         if: ${{ failure() }}
-        run: docker compose logs --no-color
+        run: |
+          docker compose logs --no-color
+          cat mock-oidc.log || true
       - name: Nettoyer la pile du run
         if: ${{ always() }}
-        run: docker compose down --volumes --remove-orphans --rmi local
+        run: |
+          docker compose down --volumes --remove-orphans --rmi local
+          kill "$MOCK_PID" || true

@@ -311,6 +311,75 @@ describe("admin request routes", () => {
     assert.equal(list.requests.length, 0);
   });
 
+  it("rejects a request with a reason, then answers 409, recording one event", async () => {
+    const { user, admin } = setup();
+    const request = await created(await call(user, "POST", "/api/requests", { title: "A" }));
+    await call(admin, "POST", `/api/admin/requests/${request.id}/accept`);
+    const res = await call(admin, "POST", `/api/admin/requests/${request.id}/reject`, {
+      reason: "  Introuvable  ",
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      request: Dto & { rejectReason: string | null; trackId: string | null };
+    };
+    assert.equal(body.request.status, "rejected");
+    assert.equal(body.request.rejectReason, "Introuvable");
+    assert.equal(body.request.trackId, null);
+    const again = await call(admin, "POST", `/api/admin/requests/${request.id}/reject`, {});
+    assert.equal(again.status, 409);
+    assert.equal(await errorCode(again), "request_not_pending");
+    const events = t.db
+      .prepare("SELECT detail FROM admin_events WHERE action = 'request_reject'")
+      .all() as { detail: string }[];
+    assert.equal(events.length, 1);
+    assert.ok(!events[0]!.detail.includes("Introuvable"));
+  });
+
+  it("rejects without a body, answers 404 for an unknown id and 400 for a bad reason", async () => {
+    const { user, admin } = setup();
+    const request = await created(await call(user, "POST", "/api/requests", { title: "A" }));
+    assert.equal(
+      (await call(admin, "POST", `/api/admin/requests/${request.id}/reject`, "x")).status,
+      400,
+    );
+    assert.equal(
+      (
+        await call(admin, "POST", `/api/admin/requests/${request.id}/reject`, {
+          reason: "x".repeat(201),
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (await call(admin, "POST", `/api/admin/requests/${request.id}/reject`)).status,
+      200,
+    );
+    const missing = await call(admin, "POST", "/api/admin/requests/nope/reject", {});
+    assert.equal(missing.status, 404);
+    assert.equal(await errorCode(missing), "request_not_found");
+    assert.equal(
+      (await call(user, "POST", `/api/admin/requests/${request.id}/reject`, {})).status,
+      403,
+    );
+  });
+
+  it("exposes trackId and rejectReason on the user and the admin lists", async () => {
+    const { user, admin } = setup();
+    const request = await created(await call(user, "POST", "/api/requests", { title: "A" }));
+    await call(admin, "POST", `/api/admin/requests/${request.id}/reject`, { reason: "Non" });
+    for (const [cookie, url] of [
+      [user, "/api/requests"],
+      [admin, "/api/admin/requests"],
+    ] as const) {
+      const list = (await (await call(cookie, "GET", url)).json()) as {
+        requests: { status: string; trackId: string | null; rejectReason: string | null }[];
+      };
+      assert.equal(list.requests[0]?.status, "rejected");
+      assert.equal(list.requests[0]?.rejectReason, "Non");
+      assert.equal(list.requests[0]?.trackId, null);
+    }
+  });
+
   it("requires CSRF on admin mutations", async () => {
     const { user, admin } = setup();
     const request = await created(await call(user, "POST", "/api/requests", { title: "A" }));

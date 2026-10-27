@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { inTransaction } from "../catalog/tx.ts";
 
 export type RequestSource = "musicbrainz" | "deezer" | "itunes" | "manual";
-export type RequestStatus = "pending" | "accepted";
+export type RequestStatus = "pending" | "accepted" | "added" | "rejected";
 
 export const MAX_PENDING_REQUESTS = 20;
 
@@ -42,6 +42,8 @@ export interface RequestRow {
   status: RequestStatus;
   created_at: string;
   updated_at: string;
+  track_id: string | null;
+  reject_reason: string | null;
   display_name?: string | null;
 }
 
@@ -54,13 +56,15 @@ export interface SongRequestDto {
   source: RequestSource;
   coverUrl: string | null;
   status: RequestStatus;
+  trackId: string | null;
+  rejectReason: string | null;
   createdAt: string;
   updatedAt: string;
   requestedBy?: { id: string; displayName: string | null };
 }
 
 const COLUMNS =
-  "r.id, r.user_id, r.title, r.artist, r.album, r.year, r.source, r.cover_url, r.status, r.created_at, r.updated_at";
+  "r.id, r.user_id, r.title, r.artist, r.album, r.year, r.source, r.cover_url, r.status, r.created_at, r.updated_at, r.track_id, r.reject_reason";
 
 /** Same rule as the metadata proposal key: NFKC, French lower case, collapsed spaces, trim. */
 const normalize = (text: string | null) =>
@@ -79,6 +83,8 @@ export function toRequestDto(row: RequestRow, opts: { withUser?: boolean } = {})
     source: row.source,
     coverUrl: row.cover_url,
     status: row.status,
+    trackId: row.track_id,
+    rejectReason: row.reject_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -179,6 +185,34 @@ export function acceptRequest(
     );
     return findRequest(db, id);
   });
+}
+
+/** Null when the request does not exist, "not_open" when it is already added or rejected. */
+export function rejectRequest(
+  db: DatabaseSync,
+  id: string,
+  reason: string | null,
+  now: Date,
+): RequestRow | "not_open" | null {
+  return inTransaction(db, () => {
+    const row = findRequest(db, id);
+    if (!row) return null;
+    if (row.status !== "pending" && row.status !== "accepted") return "not_open";
+    db.prepare(
+      "UPDATE song_requests SET status = 'rejected', reject_reason = ?, updated_at = ? WHERE id = ?",
+    ).run(reason, now.toISOString(), id);
+    return findRequest(db, id);
+  });
+}
+
+/** Marks an open request added and linked to its track. False when it is missing or closed. */
+export function fulfilRequest(db: DatabaseSync, id: string, trackId: string, now: Date): boolean {
+  const result = db
+    .prepare(
+      "UPDATE song_requests SET status = 'added', track_id = ?, updated_at = ? WHERE id = ? AND status IN ('pending','accepted')",
+    )
+    .run(trackId, now.toISOString(), id);
+  return Number(result.changes) > 0;
 }
 
 /** With opts the request must belong to userId (and be pending when pendingOnly). */

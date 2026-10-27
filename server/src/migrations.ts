@@ -65,6 +65,33 @@ ALTER TABLE imports ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE S
 ALTER TABLE imports ADD COLUMN source_url TEXT;
 `,
   },
+  {
+    id: 7,
+    sql: `
+CREATE TABLE song_requests_new (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL DEFAULT '',
+  album TEXT,
+  year INTEGER,
+  source TEXT NOT NULL CHECK (source IN ('musicbrainz','deezer','itunes','manual')),
+  cover_url TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','added','rejected')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  track_id TEXT REFERENCES tracks(id) ON DELETE SET NULL,
+  reject_reason TEXT
+);
+INSERT INTO song_requests_new (id, user_id, title, artist, album, year, source, cover_url, status, created_at, updated_at)
+  SELECT id, user_id, title, artist, album, year, source, cover_url, status, created_at, updated_at FROM song_requests;
+DROP TABLE song_requests;
+ALTER TABLE song_requests_new RENAME TO song_requests;
+CREATE INDEX song_requests_status_created ON song_requests(status, created_at);
+CREATE INDEX song_requests_user ON song_requests(user_id);
+ALTER TABLE imports ADD COLUMN request_id TEXT REFERENCES song_requests(id) ON DELETE SET NULL;
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

@@ -8,6 +8,7 @@ import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import type { AppConfig } from "../config.ts";
 import { jsonError } from "../http.ts";
 import type { MediaStorage } from "../media/storage.ts";
+import { findRequest } from "../requests/repo.ts";
 import { receive } from "./multipart.ts";
 
 interface ImportRow {
@@ -74,7 +75,7 @@ export function adminImportRoutes(
     }
     const importId = crypto.randomUUID();
     const dir = deps.storage.incomingDir(importId);
-    const { outcome, filename, folderId } = await receive(
+    const { outcome, filename, folderId, requestId } = await receive(
       c.req.raw,
       path.join(dir, "upload.bin"),
       deps.config.maxUploadBytes,
@@ -91,13 +92,20 @@ export function adminImportRoutes(
       await deps.storage.removeIncoming(importId);
       return jsonError(c, 400, "bad_request", "Unknown folder");
     }
+    if (requestId !== null) {
+      const request = findRequest(deps.db, requestId);
+      if (!request || (request.status !== "pending" && request.status !== "accepted")) {
+        await deps.storage.removeIncoming(importId);
+        return jsonError(c, 400, "bad_request", "Unknown or already handled request");
+      }
+    }
     const stamp = deps.now().toISOString();
     try {
       deps.db
         .prepare(
-          "INSERT INTO imports (id, user_id, filename, state, error, track_id, folder_id, created_at, updated_at) VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?, ?)",
+          "INSERT INTO imports (id, user_id, filename, state, error, track_id, folder_id, request_id, created_at, updated_at) VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?, ?, ?)",
         )
-        .run(importId, c.get("user").id, filename, folderId, stamp, stamp);
+        .run(importId, c.get("user").id, filename, folderId, requestId, stamp, stamp);
     } catch (error) {
       await deps.storage.removeIncoming(importId);
       throw error;

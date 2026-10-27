@@ -20,16 +20,22 @@ export type Received = "stored" | "too_large" | "no_file" | "bad_request";
  *
  * An optional text field "folderId" is returned in `folderId` (null when absent or empty). Parts
  * arrive in order, so the field must come BEFORE the "file" part: a "folderId" field sent after
- * "file" is ignored (the upload then goes to the inbox).
+ * "file" is ignored (the upload then goes to the inbox). The optional text field "requestId" is
+ * handled the same way.
  */
 export async function receive(
   request: Request,
   target: string,
   maxBytes: number,
-): Promise<{ outcome: Received; filename: string; folderId: string | null }> {
+): Promise<{
+  outcome: Received;
+  filename: string;
+  folderId: string | null;
+  requestId: string | null;
+}> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!request.body || !/^multipart\/form-data/i.test(contentType)) {
-    return { outcome: "bad_request", filename: "", folderId: null };
+    return { outcome: "bad_request", filename: "", folderId: null, requestId: null };
   }
   let parser: busboy.Busboy;
   try {
@@ -40,19 +46,20 @@ export async function receive(
       limits: { files: 1, fileSize: maxBytes + 1, fieldSize: 256, fields: 8 },
     });
   } catch {
-    return { outcome: "bad_request", filename: "", folderId: null };
+    return { outcome: "bad_request", filename: "", folderId: null, requestId: null };
   }
   const state = { outcome: "no_file" as Received };
   let filename = "";
   let folderId: string | null = null;
+  let requestId: string | null = null;
   const writes: Promise<void>[] = [];
   const source = Readable.fromWeb(request.body as NodeWebStream<Uint8Array>);
   const done = new Promise<void>((resolve, reject) => {
     parser.on("field", (name, value) => {
       // Only a value seen before the file part counts (a too long one is cut and so unknown).
-      if (name === "folderId" && state.outcome === "no_file") {
-        folderId = value.trim() === "" ? null : value.trim();
-      }
+      if (state.outcome !== "no_file") return;
+      if (name === "folderId") folderId = value.trim() === "" ? null : value.trim();
+      if (name === "requestId") requestId = value.trim() === "" ? null : value.trim();
     });
     parser.on("file", (name, stream, info) => {
       if (name !== "file" || state.outcome !== "no_file") {
@@ -80,7 +87,8 @@ export async function receive(
       outcome: state.outcome === "too_large" ? state.outcome : "bad_request",
       filename,
       folderId,
+      requestId,
     };
   }
-  return { outcome: state.outcome, filename, folderId };
+  return { outcome: state.outcome, filename, folderId, requestId };
 }

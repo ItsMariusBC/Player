@@ -93,6 +93,7 @@ const imports = createImportQueue({
   log,
   ffmpegPath: config.ffmpegPath,
   download: { maxBytes: config.maxUploadBytes, userAgent },
+  cover: { userAgent },
 });
 const health = createHealth({
   db,

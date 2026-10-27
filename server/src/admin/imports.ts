@@ -1,13 +1,16 @@
 import { execFile } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { recordAdminEvent } from "./events.ts";
 import { updateTrackLoudness } from "../catalog/tracks.ts";
 import { inTransaction } from "../catalog/tx.ts";
 import { downloadToFile, type DownloadOptions } from "../media/download.ts";
 import { ingestFile } from "../media/ingest.ts";
 import { measureLoudness, type Loudness } from "../media/loudness.ts";
 import type { MediaStorage } from "../media/storage.ts";
-import { resolveHost } from "../metadata/fetch-guard.ts";
+import { MAX_COVER_BYTES } from "../media/image.ts";
+import { COVER_HOSTS, guardedFetchImage, resolveHost } from "../metadata/fetch-guard.ts";
+import { findRequest, fulfilRequest, type RequestRow } from "../requests/repo.ts";
 
 /** Imports allowed in `processing` at once; further requests are answered 429 `too_many_imports`. */
 export const MAX_PROCESSING_IMPORTS = 50;
@@ -61,6 +64,7 @@ interface ImportRow {
   user_id: string;
   filename: string;
   folder_id: string | null;
+  request_id: string | null;
 }
 
 export function createImportQueue(deps: {
@@ -74,6 +78,12 @@ export function createImportQueue(deps: {
   ffmpegAvailable?: () => Promise<boolean>;
   /** Import by URL: size cap and the network seams (tests inject fetch and resolve). */
   download: Pick<DownloadOptions, "maxBytes"> & Partial<Omit<DownloadOptions, "maxBytes">>;
+  /** Cover of a fulfilled request: the guard's network seams (tests inject fetch and resolve). */
+  cover?: {
+    fetch?: typeof globalThis.fetch;
+    resolve?: (host: string) => Promise<string[]>;
+    userAgent?: string;
+  };
 }): ImportQueue {
   const { db, storage, log } = deps;
   const now = deps.now ?? (() => new Date());
@@ -210,11 +220,48 @@ export function createImportQueue(deps: {
     ).run(state, error ? JSON.stringify(error) : null, trackId, now().toISOString(), id);
   }
 
+  function findOpenRequest(id: string): RequestRow | null {
+    const found = findRequest(db, id);
+    return found && (found.status === "pending" || found.status === "accepted") ? found : null;
+  }
+
+  /** The requested cover, only when the file has no embedded one; a failure is logged and ignored. */
+  async function requestCover(importId: string, request: RequestRow, embedded: boolean) {
+    if (embedded || !request.cover_url) return null;
+    try {
+      return await guardedFetchImage(new URL(request.cover_url), {
+        allowedHosts: COVER_HOSTS,
+        maxBytes: MAX_COVER_BYTES,
+        resolve: deps.cover?.resolve ?? resolveHost,
+        fetch: deps.cover?.fetch,
+        userAgent: deps.cover?.userAgent,
+      });
+    } catch (error) {
+      log?.("request.cover_failed", {
+        importId,
+        requestId: request.id,
+        error: error instanceof Error ? error.name : "unknown",
+        reason: (error as { reason?: unknown }).reason,
+      });
+      return null;
+    }
+  }
+
+  /** Marks the request added and records the event; inside the caller's transaction. */
+  function fulfil(requestId: string, trackId: string, userId: string, stamp: Date) {
+    if (!fulfilRequest(db, requestId, trackId, stamp)) return;
+    recordAdminEvent(
+      db,
+      { userId, action: "request_fulfilled", trackId, detail: { requestId, trackId } },
+      stamp,
+    );
+  }
+
   async function run(importId: string): Promise<void> {
     try {
       const row = db
         .prepare(
-          "SELECT id, user_id, filename, folder_id FROM imports WHERE id = ? AND state = 'processing'",
+          "SELECT id, user_id, filename, folder_id, request_id FROM imports WHERE id = ? AND state = 'processing'",
         )
         .get(importId) as unknown as ImportRow | undefined;
       if (!row) {
@@ -222,6 +269,7 @@ export function createImportQueue(deps: {
         return;
       }
       const stamp = now();
+      const request = row.request_id ? findOpenRequest(row.request_id) : null;
       const result = await ingestFile({
         db,
         storage,
@@ -236,6 +284,14 @@ export function createImportQueue(deps: {
             | undefined;
           return folder ? folder.id : null;
         },
+        ...(request
+          ? {
+              ...(request.title.trim() ? { title: request.title } : {}),
+              ...(request.artist.trim() ? { artist: request.artist } : {}),
+              ...(request.album?.trim() ? { album: request.album } : {}),
+              cover: (embedded: boolean) => requestCover(importId, request, embedded),
+            }
+          : {}),
         fallbackTitle: path.basename(row.filename, path.extname(row.filename)) || "Untitled",
         now: stamp,
       });
@@ -252,13 +308,17 @@ export function createImportQueue(deps: {
             JSON.stringify({ importId, filename: row.filename }),
             stamp.toISOString(),
           );
+          if (row.request_id) fulfil(row.request_id, result.track.id, row.user_id, stamp);
           db.exec("COMMIT");
         } catch (error) {
           db.exec("ROLLBACK");
           throw error;
         }
       } else if (result.kind === "duplicate") {
-        finish(importId, "failed", { reason: "duplicate", trackId: result.trackId }, null);
+        inTransaction(db, () => {
+          finish(importId, "failed", { reason: "duplicate", trackId: result.trackId }, null);
+          if (row.request_id) fulfil(row.request_id, result.trackId, row.user_id, stamp);
+        });
       } else {
         finish(importId, "failed", { reason: "unsupported_format" }, null);
       }

@@ -12,6 +12,8 @@ export type AdminAction =
   | "metadata_apply"
   | "request_accept"
   | "request_delete"
+  | "request_reject"
+  | "request_fulfilled"
   | "loudness_backfill"
   | "maintenance_run";
 

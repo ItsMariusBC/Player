@@ -102,7 +102,7 @@ Le script importe un dossier de fichiers audio existant (récursif) dans le cata
 docker compose run --rm -v <dossier-de-musique>:/import:ro -v <manifeste.json>:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
 ```
 
-En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué.
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue.
 
 Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
 
@@ -127,7 +127,7 @@ Après un déploiement, avec Authentik réel :
 1. Se connecter avec un compte du groupe `admin` : le bouton d'administration apparaît à côté de la déconnexion et ouvre le panneau.
 2. Importer un fichier FLAC, MP3 ou WAV (zone de dépôt, clic ou glisser-déposer) : l'import passe de `processing` à `ready` et le titre apparaît dans la liste et dans le lecteur après rafraîchissement du catalogue (60 s au plus).
 3. Déposer le même fichier : l'import échoue avec la raison `duplicate`.
-4. Après la migration 4 (volume) : dans l'onglet Catalogue, la ligne « Volume : n titres sur m analysés » s'affiche ; cliquer sur « Analyser les titres restants » et suivre les compteurs jusqu'à ce que tous les titres soient analysés (le bouton se désactive). Si la ligne indique « ffmpeg introuvable sur le serveur », vérifier `FFMPEG_PATH` (voir `.env.example`) ; l'image Docker embarque ffmpeg.
+4. Après les migrations 4 et 5 (volume, colonne `loudness_measured_at`) : dans l'onglet Catalogue, la ligne « Volume : n titres sur m analysés » s'affiche ; cliquer sur « Analyser les titres restants » et suivre les compteurs : l'état se relit toutes les 2 s tant que la passe tourne (`running`) puis s'arrête, et le bouton se désactive. Les titres silencieux ou illisibles sortent des restants et sont comptés « n titres sans mesure » ; `updated_at` n'est pas modifié. Un ffmpeg absent donne une réponse 409 `ffmpeg_unavailable` (rien n'est mis en file). Si la ligne indique « ffmpeg introuvable sur le serveur », vérifier `FFMPEG_PATH` (voir `.env.example`) ; l'image Docker embarque ffmpeg.
 5. Modifier titre, artiste, album, dossier, pochette ; vérifier la lecture et la pochette mises à jour.
 6. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
 7. Supprimer le titre de test et le dossier de test.

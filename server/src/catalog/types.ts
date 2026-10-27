@@ -20,6 +20,8 @@ export interface TrackRecord {
   /** Integrated loudness (LUFS); null when not measured. */
   loudnessLufs: number | null;
   truePeakDbtp: number | null;
+  /** Last measurement attempt (success or not); null = never tried. Not exposed in the DTO. */
+  loudnessMeasuredAt: Date | null;
   position: number;
   createdAt: Date;
   updatedAt: Date;

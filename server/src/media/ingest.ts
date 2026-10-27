@@ -79,6 +79,7 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
         status: "ready",
         loudnessLufs: loudness?.lufs ?? null,
         truePeakDbtp: loudness?.truePeakDbtp ?? null,
+        loudnessMeasuredAt: input.measure ? now : null,
       },
       now,
     );

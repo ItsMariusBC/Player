@@ -151,8 +151,9 @@ export function createMusicManager(): MusicManager {
       }
       return;
     }
-    if (standbyUrl === next.url) return;
+    // Set the gain first: the track may already be in place with a gain that changed since.
     setElementGain(standby, next.gainDb);
+    if (standbyUrl === next.url) return;
     standby.src = next.url;
     standby.preload = "auto";
     standby.load();

@@ -52,6 +52,12 @@ ALTER TABLE tracks ADD COLUMN loudness_lufs REAL;
 ALTER TABLE tracks ADD COLUMN true_peak_dbtp REAL;
 `,
   },
+  {
+    id: 5,
+    sql: `
+ALTER TABLE tracks ADD COLUMN loudness_measured_at TEXT;
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

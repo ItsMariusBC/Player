@@ -9,17 +9,25 @@ import type { MediaStorage } from "../media/storage.ts";
 
 export interface ImportQueue {
   enqueue(importId: string): void;
-  /** Resolves once every job enqueued so far has finished. */
+  /** Resolves once every job enqueued so far (and any running backfill pass) has finished. */
   idle(): Promise<void>;
-  /** Queues one measurement per ready, unmeasured track on the same serialized chain. Returns how many. */
-  backfillLoudness(): number;
+  /**
+   * Starts a lazy backfill pass over ready tracks never measured, on the same serialized chain as
+   * imports. `queued` is the pending count when a pass starts, 0 when one is already running.
+   */
+  backfillLoudness(): { queued: number; running: boolean };
   loudnessStatus(): Promise<LoudnessStatus>;
 }
 
 export interface LoudnessStatus {
   total: number;
   measured: number;
+  /** Attempted without a value (silent or unreadable). */
+  failed: number;
+  /** Never attempted. */
   pending: number;
+  /** A backfill pass is in progress. */
+  running: boolean;
   /** Whether ffmpeg can be run. */
   available: boolean;
 }
@@ -55,7 +63,66 @@ export function createImportQueue(deps: {
   const ffmpegPath = deps.ffmpegPath ?? "ffmpeg";
   const measure = deps.measure ?? ((file: string) => measureLoudness(file, { ffmpegPath, log }));
   const checkAvailable = deps.ffmpegAvailable ?? (() => probeFfmpeg(ffmpegPath));
-  let available: Promise<boolean> | null = null;
+  // Only a positive probe is cached: a missing binary is re-checked on each status call.
+  let availableCached = false;
+  let backfilling = false;
+  const inFlight = new Set<string>();
+  const PENDING = "status = 'ready' AND loudness_measured_at IS NULL AND loudness_lufs IS NULL";
+
+  function nextPending(): { id: string; format: "flac" | "mp3" | "wav" } | undefined {
+    const skip = [...inFlight];
+    const exclude = skip.length ? ` AND id NOT IN (${skip.map(() => "?").join(", ")})` : "";
+    return db
+      .prepare(
+        `SELECT id, format FROM tracks WHERE ${PENDING}${exclude} ORDER BY created_at, rowid LIMIT 1`,
+      )
+      .get(...skip) as { id: string; format: "flac" | "mp3" | "wav" } | undefined;
+  }
+
+  /** One backfill step: measure the next pending track, then schedule the next step after the chain. */
+  async function backfillStep(): Promise<void> {
+    let row: ReturnType<typeof nextPending>;
+    try {
+      row = nextPending();
+    } catch {
+      backfilling = false;
+      return;
+    }
+    if (!row) {
+      backfilling = false;
+      return;
+    }
+    inFlight.add(row.id);
+    try {
+      let loudness: Loudness | null = null;
+      try {
+        loudness = await measure(storage.originalPath(row.id, row.format));
+      } catch (error) {
+        log?.("loudness.backfill_failed", {
+          trackId: row.id,
+          error: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      updateTrackLoudness(db, row.id, loudness, now());
+    } catch (error) {
+      // The database itself is failing: stop the pass rather than spin on the same track.
+      log?.("loudness.backfill_failed", {
+        trackId: row.id,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      backfilling = false;
+      return;
+    } finally {
+      inFlight.delete(row.id);
+    }
+    scheduleBackfillStep();
+  }
+
+  function scheduleBackfillStep() {
+    chain = chain.then(backfillStep).catch(() => {
+      backfilling = false;
+    });
+  }
 
   function finish(
     id: string,
@@ -129,45 +196,44 @@ export function createImportQueue(deps: {
       // run() handles its own errors; the catch keeps the chain alive if even that throws.
       chain = chain.then(() => run(importId)).catch(() => {});
     },
-    idle() {
-      return chain;
+    async idle() {
+      // Backfill steps append to the chain as they run: wait until it stops growing.
+      let seen: Promise<void>;
+      do {
+        seen = chain;
+        await seen;
+      } while (seen !== chain);
     },
     backfillLoudness() {
-      const rows = db
-        .prepare(
-          "SELECT id, format FROM tracks WHERE status = 'ready' AND loudness_lufs IS NULL ORDER BY created_at, rowid",
-        )
-        .all() as { id: string; format: "flac" | "mp3" | "wav" }[];
-      for (const row of rows) {
-        chain = chain
-          .then(async () => {
-            // Deleted since it was queued: nothing to measure.
-            const still = db.prepare("SELECT id FROM tracks WHERE id = ?").get(row.id);
-            if (!still) return;
-            const loudness = await measure(storage.originalPath(row.id, row.format));
-            if (loudness) updateTrackLoudness(db, row.id, loudness, now());
-          })
-          .catch((error) => {
-            log?.("loudness.backfill_failed", {
-              trackId: row.id,
-              error: error instanceof Error ? error.name : "unknown",
-            });
-          });
-      }
-      return rows.length;
+      if (backfilling) return { queued: 0, running: true };
+      const { n } = db
+        .prepare(`SELECT COUNT(*) AS n FROM tracks WHERE ${PENDING}`)
+        .get() as unknown as {
+        n: number;
+      };
+      if (n === 0) return { queued: 0, running: false };
+      backfilling = true;
+      scheduleBackfillStep();
+      return { queued: n, running: true };
     },
     async loudnessStatus() {
       const counts = db
         .prepare(
-          "SELECT COUNT(*) AS total, COUNT(loudness_lufs) AS measured FROM tracks WHERE status = 'ready'",
+          `SELECT COUNT(*) AS total,
+                  COUNT(loudness_lufs) AS measured,
+                  COALESCE(SUM(loudness_lufs IS NULL AND loudness_measured_at IS NOT NULL), 0) AS failed,
+                  COALESCE(SUM(loudness_lufs IS NULL AND loudness_measured_at IS NULL), 0) AS pending
+           FROM tracks WHERE status = 'ready'`,
         )
-        .get() as unknown as { total: number; measured: number };
-      available ??= checkAvailable().catch(() => false);
+        .get() as unknown as { total: number; measured: number; failed: number; pending: number };
+      if (!availableCached) availableCached = await checkAvailable().catch(() => false);
       return {
         total: counts.total,
         measured: counts.measured,
-        pending: counts.total - counts.measured,
-        available: await available,
+        failed: counts.failed,
+        pending: counts.pending,
+        running: backfilling,
+        available: availableCached,
       };
     },
   };

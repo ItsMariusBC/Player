@@ -16,6 +16,7 @@ interface TrackRow {
   status: "ready" | "failed";
   loudness_lufs: number | null;
   true_peak_dbtp: number | null;
+  loudness_measured_at: string | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -36,6 +37,7 @@ function toRecord(row: TrackRow): TrackRecord {
     status: row.status,
     loudnessLufs: row.loudness_lufs,
     truePeakDbtp: row.true_peak_dbtp,
+    loudnessMeasuredAt: row.loudness_measured_at ? new Date(row.loudness_measured_at) : null,
     position: row.position,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -82,18 +84,19 @@ export function insertTrack(
   db: DatabaseSync,
   input: Omit<
     TrackRecord,
-    "createdAt" | "updatedAt" | "position" | "loudnessLufs" | "truePeakDbtp"
+    "createdAt" | "updatedAt" | "position" | "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt"
   > &
-    Partial<Pick<TrackRecord, "loudnessLufs" | "truePeakDbtp">>,
+    Partial<Pick<TrackRecord, "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt">>,
   now: Date,
 ): TrackRecord {
   const loudnessLufs = input.loudnessLufs ?? null;
   const truePeakDbtp = input.truePeakDbtp ?? null;
+  const loudnessMeasuredAt = input.loudnessMeasuredAt ?? null;
   const position = nextPosition(db, input.folderId);
   const iso = now.toISOString();
   db.prepare(
-    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, loudness_lufs, true_peak_dbtp, position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, loudness_lufs, true_peak_dbtp, loudness_measured_at, position, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.folderId,
@@ -108,11 +111,20 @@ export function insertTrack(
     input.status,
     loudnessLufs,
     truePeakDbtp,
+    loudnessMeasuredAt?.toISOString() ?? null,
     position,
     iso,
     iso,
   );
-  return { ...input, loudnessLufs, truePeakDbtp, position, createdAt: now, updatedAt: now };
+  return {
+    ...input,
+    loudnessLufs,
+    truePeakDbtp,
+    loudnessMeasuredAt,
+    position,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 const PATCH_COLUMNS = {
@@ -148,16 +160,25 @@ export function updateTrack(
   return requireTrack(db, id);
 }
 
-/** Stores a measurement. Returns false when the track no longer exists. */
+/**
+ * Records a measurement attempt: always stamps `loudness_measured_at`, stores the values when
+ * present. `updated_at` is left alone (it drives client cover caching). False when the track is gone.
+ */
 export function updateTrackLoudness(
   db: DatabaseSync,
   id: string,
-  loudness: { lufs: number; truePeakDbtp: number | null },
+  loudness: { lufs: number; truePeakDbtp: number | null } | null,
   now: Date,
 ): boolean {
-  const result = db
-    .prepare("UPDATE tracks SET loudness_lufs = ?, true_peak_dbtp = ?, updated_at = ? WHERE id = ?")
-    .run(loudness.lufs, loudness.truePeakDbtp, now.toISOString(), id);
+  const result = loudness
+    ? db
+        .prepare(
+          "UPDATE tracks SET loudness_lufs = ?, true_peak_dbtp = ?, loudness_measured_at = ? WHERE id = ?",
+        )
+        .run(loudness.lufs, loudness.truePeakDbtp, now.toISOString(), id)
+    : db
+        .prepare("UPDATE tracks SET loudness_measured_at = ? WHERE id = ?")
+        .run(now.toISOString(), id);
   return Number(result.changes) > 0;
 }
 

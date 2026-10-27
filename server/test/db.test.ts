@@ -6,7 +6,7 @@ import { migrate } from "../src/migrations.ts";
 describe("database", () => {
   it("applies migrations once and is idempotent", () => {
     const db = openDatabase(":memory:");
-    assert.equal(migrate(db), 3);
+    assert.equal(migrate(db), 4);
     assert.equal(migrate(db), 0);
     db.close();
   });
@@ -99,6 +99,27 @@ describe("song_requests table", () => {
     db.prepare("DELETE FROM users WHERE id = 'u'").run();
     const count = db.prepare("SELECT COUNT(*) AS n FROM song_requests").get() as { n: number };
     assert.equal(count.n, 0);
+    db.close();
+  });
+});
+
+describe("tracks loudness columns", () => {
+  it("are created by migration 4 and accept NULL", () => {
+    const db = openDatabase(":memory:");
+    migrate(db);
+    const columns = db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[];
+    const names = columns.map((c) => c.name);
+    assert.ok(names.includes("loudness_lufs"));
+    assert.ok(names.includes("true_peak_dbtp"));
+    db.prepare(
+      "INSERT INTO tracks (id, title, format, size_bytes, sha256, created_at, updated_at) VALUES ('t', 'T', 'wav', 1, 'h', 'a', 'a')",
+    ).run();
+    const row = db.prepare("SELECT loudness_lufs, true_peak_dbtp FROM tracks").get() as {
+      loudness_lufs: number | null;
+      true_peak_dbtp: number | null;
+    };
+    assert.equal(row.loudness_lufs, null);
+    assert.equal(row.true_peak_dbtp, null);
     db.close();
   });
 });

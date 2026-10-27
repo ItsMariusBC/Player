@@ -17,6 +17,7 @@ export interface AppConfig {
     groupsRecheckMs: number;
   };
   trustProxy: boolean;
+  maxUploadBytes: number;
   /** Dev-only login bypass, always false in production. */
   devBypass: boolean;
 }
@@ -25,6 +26,7 @@ type Env = Record<string, string | undefined>;
 
 const HOUR_MS = 3_600_000;
 const GROUPS_RECHECK_MS = 15 * 60 * 1000;
+const BYTES_PER_MB = 1024 * 1024;
 const SECRET_BYTES = 32;
 const NODE_ENVS = ["development", "production", "test"] as const;
 
@@ -54,6 +56,16 @@ function positiveNumber(env: Env, name: string, fallback: number): number {
     throw new ConfigError(`${name} must be a positive number, got "${raw}"`);
   }
   return value;
+}
+
+function parseMaxUploadBytes(env: Env): number {
+  const raw = env.MAX_UPLOAD_MB?.trim();
+  if (!raw) return 200 * BYTES_PER_MB;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`MAX_UPLOAD_MB must be a positive integer, got "${raw}"`);
+  }
+  return value * BYTES_PER_MB;
 }
 
 function parsePort(env: Env): number {
@@ -135,6 +147,7 @@ export function loadConfig(env: Env): AppConfig {
       groupsRecheckMs: GROUPS_RECHECK_MS,
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
+    maxUploadBytes: parseMaxUploadBytes(env),
     devBypass: parseDevBypass(env, nodeEnv, appUrl),
   };
 }

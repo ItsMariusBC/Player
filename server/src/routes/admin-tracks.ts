@@ -5,7 +5,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { recordAdminEvent } from "../admin/events.ts";
 import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import { getFolder } from "../catalog/folders.ts";
-import { deleteTrack, getTrack, moveTrack, toTrackDto, updateTrack } from "../catalog/tracks.ts";
+import {
+  deleteTrack,
+  findTrackBySha,
+  getTrack,
+  moveTrack,
+  toTrackDto,
+  updateTrack,
+} from "../catalog/tracks.ts";
 import { inTransaction } from "../catalog/tx.ts";
 import type { TrackRecord } from "../catalog/types.ts";
 import { jsonError, readJsonObject } from "../http.ts";
@@ -51,6 +58,9 @@ async function readHead(file: string): Promise<Buffer> {
 }
 
 class UnknownFolder extends Error {}
+
+const describe = (error: unknown) =>
+  error instanceof Error ? `${error.name}: ${error.message}` : "unknown";
 
 interface TrackPatch {
   title?: string;
@@ -126,32 +136,30 @@ export function adminTrackRoutes(
   };
 
   /**
-   * Rewrites the tags on a copy, then moves the copy over the original. Returns the new
-   * sha256 and size, or null when no tag could be written (the original is then untouched).
+   * Rewrites the tags on a scratch copy and returns it with its sha256 and size, or null when
+   * no tag could be written. The original is never touched here: the caller moves the copy
+   * into place after the database commit, and removes it otherwise.
    */
-  async function rewriteTags(track: TrackRecord, patch: TrackPatch) {
+  async function tagCopy(track: TrackRecord, patch: TrackPatch) {
+    if (track.format === "wav") return null;
     const tags = {
       title: patch.title ?? track.title,
       artist: patch.artist ?? track.artist,
       album: patch.album ?? track.album,
     };
-    if (track.format === "wav") return null;
-    const original = storage.originalPath(track.id, track.format);
     const copy = storage.scratchPath(track.id);
     try {
-      await copyFile(original, copy);
-      if (!(await writeTags(copy, track.format, tags, deps.log))) return null;
+      await copyFile(storage.originalPath(track.id, track.format), copy);
+      if (!(await writeTags(copy, track.format, tags, deps.log))) {
+        await rm(copy, { force: true });
+        return null;
+      }
       const [sha256, info] = await Promise.all([hashFile(copy), stat(copy)]);
-      await rename(copy, original);
-      return { sha256, sizeBytes: info.size };
+      return { copy, sha256, sizeBytes: info.size };
     } catch (error) {
-      deps.log?.("tags.rewrite_failed", {
-        trackId: track.id,
-        error: error instanceof Error ? `${error.name}: ${error.message}` : "unknown",
-      });
-      return null;
-    } finally {
+      deps.log?.("tags.rewrite_failed", { trackId: track.id, error: describe(error) });
       await rm(copy, { force: true });
+      return null;
     }
   }
 
@@ -174,10 +182,21 @@ export function adminTrackRoutes(
       if (!track) return jsonError(c, 404, "not_found", "Track not found");
       const touchesTags =
         patch.title !== undefined || patch.artist !== undefined || patch.album !== undefined;
-      const written = touchesTags ? await rewriteTags(track, patch) : null;
+      let tagged = touchesTags ? await tagCopy(track, patch) : null;
+      if (tagged) {
+        const owner = findTrackBySha(db, tagged.sha256);
+        if (owner && owner.id !== id) {
+          // Another track already has these exact bytes: keep this file as it is.
+          deps.log?.("tags.sha_collision", { trackId: id, otherId: owner.id });
+          await rm(tagged.copy, { force: true });
+          tagged = null;
+        }
+      }
+      const tagsWritten = tagged !== null;
       const now = deps.now();
+      let updated: TrackRecord;
       try {
-        const updated = inTransaction(db, () => {
+        updated = inTransaction(db, () => {
           let result = updateTrack(
             db,
             id,
@@ -185,7 +204,7 @@ export function adminTrackRoutes(
               title: patch.title,
               artist: patch.artist,
               album: patch.album,
-              ...(written ?? {}),
+              ...(tagged ? { sha256: tagged.sha256, sizeBytes: tagged.sizeBytes } : {}),
             },
             now,
           );
@@ -201,18 +220,29 @@ export function adminTrackRoutes(
               userId: c.get("user").id,
               action: "track_update",
               trackId: id,
-              detail: { ...patch, tagsWritten: written !== null },
+              detail: { ...patch, tagsWritten },
             },
             now,
           );
           return result;
         });
-        return c.json({ track: toTrackDto(updated), tagsWritten: written !== null });
       } catch (error) {
-        if (error instanceof UnknownFolder)
+        if (tagged) await rm(tagged.copy, { force: true });
+        if (error instanceof UnknownFolder) {
           return jsonError(c, 400, "bad_request", "Unknown folderId");
+        }
         return catalogErrorResponse(c, error);
       }
+      if (tagged) {
+        try {
+          await rename(tagged.copy, storage.originalPath(id, track.format));
+        } catch (error) {
+          // Same-directory rename: very unlikely, but the row now describes the tagged copy.
+          deps.log?.("tags.replace_failed", { trackId: id, error: describe(error) });
+          await rm(tagged.copy, { force: true });
+        }
+      }
+      return c.json({ track: toTrackDto(updated), tagsWritten });
     });
   });
 
@@ -236,7 +266,12 @@ export function adminTrackRoutes(
         );
       });
       // The row is gone first: the media route answers 404 even if the removal fails midway.
-      await storage.removeTrack(id);
+      try {
+        await storage.removeTrack(id);
+      } catch (error) {
+        // The delete itself succeeded; only an orphan directory is left behind.
+        deps.log?.("track.remove_failed", { trackId: id, error: describe(error) });
+      }
       return c.body(null, 204);
     });
   });
@@ -259,16 +294,25 @@ export function adminTrackRoutes(
         if (!ext) return jsonError(c, 400, "bad_request", "Expected a JPEG, PNG or WebP image");
         // The track may have been deleted while the body was streaming.
         if (!readyTrack(id)) return jsonError(c, 404, "not_found", "Track not found");
+        const previous = readyTrack(id)?.coverExt ?? null;
+        // A cover with the same extension is overwritten here; another one survives until
+        // the commit, so a failed database step leaves the previous cover in use.
         await storage.replaceCover(id, upload, ext);
         const now = deps.now();
-        inTransaction(db, () => {
-          updateTrack(db, id, { coverExt: ext }, now);
-          recordAdminEvent(
-            db,
-            { userId: c.get("user").id, action: "cover_replace", trackId: id, detail: { ext } },
-            now,
-          );
-        });
+        try {
+          inTransaction(db, () => {
+            updateTrack(db, id, { coverExt: ext }, now);
+            recordAdminEvent(
+              db,
+              { userId: c.get("user").id, action: "cover_replace", trackId: id, detail: { ext } },
+              now,
+            );
+          });
+        } catch (error) {
+          if (previous !== ext) await rm(storage.coverPath(id, ext), { force: true });
+          throw error;
+        }
+        await storage.removeOtherCovers(id, ext);
         return c.json({ hasCover: true });
       } finally {
         await rm(upload, { force: true });

@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import NodeID3 from "node-id3";
-import { getTrack } from "../src/catalog/tracks.ts";
+import { getTrack, insertTrack } from "../src/catalog/tracks.ts";
+import { writeTags } from "../src/media/tags.ts";
 import { createTestApp } from "./helpers.ts";
 import { imageBytes, writeMp3, writeWav } from "./fixtures.ts";
 
@@ -298,5 +307,82 @@ describe("admin tracks: audit and access", () => {
     assert.equal((await uploadCover(cookie, id, imageBytes("png"))).status, 403);
     assert.equal(getTrack(t.db, id)!.title !== "X", true);
     assert.deepEqual(actions(), []);
+  });
+});
+
+const failAuditTrigger = () =>
+  t.db.exec(
+    "CREATE TRIGGER fail_audit BEFORE INSERT ON admin_events BEGIN SELECT RAISE(ABORT, 'boom'); END",
+  );
+
+describe("admin tracks: failure paths", () => {
+  it("leaves the original untouched when the database step fails", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    const id = await importFixture(cookie, "mp3");
+    const before = getTrack(t.db, id)!;
+    const bytes = readFileSync(original(id, "mp3"));
+    failAuditTrigger();
+    const res = await call(cookie, "PATCH", `/api/admin/tracks/${id}`, { title: "Nouveau" });
+    assert.equal(res.status, 500);
+    assert.deepEqual(readFileSync(original(id, "mp3")), bytes);
+    assert.deepEqual(readdirSync(path.join(t.tempDir, "media", id)), ["original.mp3"]);
+    assert.deepEqual(getTrack(t.db, id), before);
+  });
+
+  it("falls back to tagsWritten false when the new sha256 belongs to another track", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    const id = await importFixture(cookie, "mp3");
+    const track = getTrack(t.db, id)!;
+    const bytes = readFileSync(original(id, "mp3"));
+    // Predict the rewritten file and register its hash on another track.
+    const predicted = path.join(scratch, "predicted.mp3");
+    copyFileSync(original(id, "mp3"), predicted);
+    assert.ok(
+      await writeTags(predicted, "mp3", {
+        title: "Nouveau",
+        artist: track.artist,
+        album: track.album,
+      }),
+    );
+    insertTrack(t.db, { ...track, id: "other", sha256: sha(predicted), coverExt: null }, t.now());
+    const res = await call(cookie, "PATCH", `/api/admin/tracks/${id}`, { title: "Nouveau" });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { track: any; tagsWritten: boolean };
+    assert.equal(body.tagsWritten, false);
+    assert.equal(body.track.title, "Nouveau");
+    assert.equal(getTrack(t.db, id)!.sha256, track.sha256);
+    assert.deepEqual(readFileSync(original(id, "mp3")), bytes);
+    assert.deepEqual(readdirSync(path.join(t.tempDir, "media", id)), ["original.mp3"]);
+  });
+
+  it("keeps the previous cover when the database step fails", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    const id = await importFixture(cookie, "wav");
+    const png = imageBytes("png");
+    assert.equal((await uploadCover(cookie, id, png)).status, 200);
+    failAuditTrigger();
+    assert.equal((await uploadCover(cookie, id, imageBytes("webp"))).status, 500);
+    assert.deepEqual(readdirSync(path.join(t.tempDir, "media", id)).sort(), [
+      "cover.png",
+      "original.wav",
+    ]);
+    assert.equal(getTrack(t.db, id)!.coverExt, "png");
+    assert.deepEqual(readFileSync(path.join(t.tempDir, "media", id, "cover.png")), png);
+  });
+
+  it("answers 204 and logs when the media removal fails after a delete", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    const id = await importFixture(cookie, "wav");
+    t.storage.removeTrack = async () => {
+      throw new Error("disk says no");
+    };
+    const res = await call(cookie, "DELETE", `/api/admin/tracks/${id}`);
+    assert.equal(res.status, 204);
+    assert.equal(getTrack(t.db, id), null);
+    assert.ok(t.log.some((entry) => entry.event === "track.remove_failed"));
   });
 });

@@ -19,8 +19,10 @@ export interface MediaStorage {
   coverPath(trackId: string, ext: CoverExt): string;
   /** Writes the cover and removes a previous cover stored with another extension. */
   writeCover(trackId: string, data: Buffer, ext: CoverExt): Promise<void>;
-  /** Moves a file of the track directory into place as the cover, removing other covers. */
+  /** Moves a file of the track directory into place as the cover (other covers are kept). */
   replaceCover(trackId: string, file: string, ext: CoverExt): Promise<void>;
+  /** Removes the covers stored with an extension other than keep. */
+  removeOtherCovers(trackId: string, keep: CoverExt): Promise<void>;
   /** A fresh hidden path inside the track directory, for writes moved into place by rename. */
   scratchPath(trackId: string): string;
   removeTrack(trackId: string): Promise<void>;
@@ -78,8 +80,8 @@ export function createMediaStorage(dataDir: string): MediaStorage {
         throw new Error("file outside track directory");
       }
       await rename(file, storage.coverPath(trackId, ext));
-      await removeOtherCovers(trackId, ext);
     },
+    removeOtherCovers: (trackId, keep) => removeOtherCovers(trackId, keep),
     scratchPath(trackId) {
       return path.join(trackDir(trackId), `.tmp-${crypto.randomUUID()}`);
     },

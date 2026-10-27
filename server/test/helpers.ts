@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
 import { loadConfig } from "../src/config.ts";
 import { openDatabase } from "../src/db.ts";
+import { createMediaStorage } from "../src/media/storage.ts";
 import { migrate } from "../src/migrations.ts";
 import { createFakeOidc, type FakeAccount, type FakeOidc } from "./oidc-fake.ts";
 
@@ -45,6 +49,9 @@ export function createTestApp(opts: TestAppOptions = {}) {
   };
   const db: DatabaseSync = openDatabase(":memory:");
   migrate(db);
+  const tempDir = mkdtempSync(path.join(tmpdir(), "player-test-"));
+  const storage = createMediaStorage(tempDir);
+  const cleanup = () => rmSync(tempDir, { recursive: true, force: true });
   const oidc: FakeOidc = createFakeOidc(accounts);
 
   let now = new Date("2026-10-26T12:00:00Z");
@@ -58,6 +65,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     config,
     db,
     oidc,
+    storage,
     now: clock,
     staticDir: opts.staticDir,
     mount: opts.mount,
@@ -96,5 +104,18 @@ export function createTestApp(opts: TestAppOptions = {}) {
     return `${SESSION_COOKIE}=${session.id}`;
   }
 
-  return { app, db, oidc, accounts, config, now: clock, advance, loginAs, log };
+  return {
+    app,
+    db,
+    oidc,
+    storage,
+    tempDir,
+    cleanup,
+    accounts,
+    config,
+    now: clock,
+    advance,
+    loginAs,
+    log,
+  };
 }

@@ -53,3 +53,24 @@ export class FolderNotEmptyError extends Error {
     this.name = "FolderNotEmptyError";
   }
 }
+
+// FolderNode and TrackDto are the wire shapes of GET /api/catalog.
+// The frontend module lib/catalog.ts mirrors them: keep both in sync.
+export interface FolderNode {
+  id: string;
+  name: string;
+  position: number;
+  children: FolderNode[];
+}
+
+export interface TrackDto {
+  id: string;
+  folderId: string | null;
+  title: string;
+  artist: string;
+  album: string;
+  durationMs: number | null;
+  format: "flac" | "mp3" | "wav";
+  hasCover: boolean;
+  position: number;
+}

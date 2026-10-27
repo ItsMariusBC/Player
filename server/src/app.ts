@@ -6,13 +6,17 @@ import type { OidcAdapter } from "./auth/oidc.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
 import { jsonError } from "./http.ts";
+import type { MediaStorage } from "./media/storage.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { catalogRoutes } from "./routes/catalog.ts";
+import { mediaRoutes } from "./routes/media.ts";
 import { mountStatic } from "./static.ts";
 
 export interface AppDeps {
   config: AppConfig;
   db: DatabaseSync;
   oidc: OidcAdapter;
+  storage: MediaStorage;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -30,7 +34,10 @@ export function createApp(deps: AppDeps) {
     c.header("X-Content-Type-Options", "nosniff");
     c.header("X-Frame-Options", "DENY");
     c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-    if (c.req.path.startsWith("/api/")) c.header("Cache-Control", "no-store");
+    // Routes may set their own policy (for example private covers).
+    if (c.req.path.startsWith("/api/") && !c.res.headers.has("Cache-Control")) {
+      c.header("Cache-Control", "no-store");
+    }
   });
 
   app.onError((err, c) => {
@@ -57,6 +64,9 @@ export function createApp(deps: AppDeps) {
       expiresAt: c.get("session").expiresAt.toISOString(),
     });
   });
+
+  app.route("/api/catalog", catalogRoutes(deps, session));
+  app.route("/api/media", mediaRoutes(deps, session));
 
   deps.mount?.(app, session);
 

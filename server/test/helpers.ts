@@ -24,6 +24,8 @@ export interface TestAppOptions {
     providers?: MetadataProvider[];
     fetch?: typeof globalThis.fetch;
     resolve?: (host: string) => Promise<string[]>;
+    /** Rate-limit wait; advances the test clock by default, so no test really sleeps. */
+    sleep?: (ms: number) => Promise<void>;
   };
 }
 
@@ -81,6 +83,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
         throw new Error("network disabled in tests");
       }),
     resolve: opts.metadata?.resolve ?? (async () => ["93.184.216.34"]),
+    sleep: opts.metadata?.sleep ?? (async (ms) => advance(ms)),
   });
   const app = createApp({
     metadata,

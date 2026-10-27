@@ -280,27 +280,130 @@ describe("createMetadataSearch", () => {
     for (const proposal of proposals) assert.deepEqual(search.getProposal(proposal.id), proposal);
   });
 
-  it("allows one request per second per provider and skips the provider otherwise", async () => {
+  /** A provider that records the injected clock at each call. */
+  function timedProvider(name: ProviderName, now: () => Date) {
+    const times: number[] = [];
+    const provider: MetadataProvider = {
+      name,
+      async search() {
+        times.push(now().getTime());
+        return [p(name, `T-${name}`, "A", null)];
+      },
+    };
+    return { provider, times };
+  }
+
+  /** A sleep whose waits stay pending until release(), advancing the clock by their delay. */
+  function manualSleep(c: ReturnType<typeof clock>) {
+    const pending: { ms: number; resolve: () => void }[] = [];
+    return {
+      waits: () => pending.map((w) => w.ms),
+      sleep: (ms: number) => new Promise<void>((resolve) => pending.push({ ms, resolve })),
+      release() {
+        for (const wait of pending.splice(0)) {
+          c.advance(wait.ms);
+          wait.resolve();
+        }
+      },
+    };
+  }
+
+  it("waits the rest of the second before calling a provider again", async () => {
     const c = clock();
-    const mb = fakeProvider("musicbrainz", [p("musicbrainz", "A", "B", null)]);
-    const dz = fakeProvider("deezer", [p("deezer", "C", "D", null)]);
-    const search = createMetadataSearch({ now: c.now, providers: [mb, dz] });
+    const mb = timedProvider("musicbrainz", c.now);
+    const dz = timedProvider("deezer", c.now);
+    const slept: number[] = [];
+    const search = createMetadataSearch({
+      now: c.now,
+      providers: [mb.provider, dz.provider],
+      sleep: async (ms) => {
+        slept.push(ms);
+        c.advance(ms);
+      },
+    });
+    const start = c.now().getTime();
 
     assert.equal((await search.search("first")).partial, false);
     c.advance(999);
     const second = await search.search("second");
-    // Every provider skipped: nothing was asked, the caller should retry shortly.
-    assert.deepEqual(second, { proposals: [], partial: true, skipped: true });
-    assert.equal(mb.calls, 1);
-    assert.equal(dz.calls, 1);
+    assert.equal(second.partial, false);
+    assert.equal("skipped" in second, false);
+    assert.equal(second.proposals.length, 2);
+    // Both providers waited the 1 ms left of their window, then were called.
+    assert.deepEqual(slept, [1, 1]);
+    // Each fake sleep advances the shared clock, so the second call lands at 1000 ms or after.
+    assert.equal(mb.times.length, 2);
+    assert.ok(mb.times[1]! - start >= 1000);
 
-    c.advance(1);
+    c.advance(1000);
+    await search.search("third");
+    assert.deepEqual(slept, [1, 1]);
+    assert.equal(mb.times.length, 3);
+  });
+
+  it("answers both searches of a burst 10 ms apart", async () => {
+    const c = clock();
+    const mb = timedProvider("musicbrainz", c.now);
+    const timer = manualSleep(c);
+    const search = createMetadataSearch({
+      now: c.now,
+      providers: [mb.provider],
+      sleep: timer.sleep,
+    });
+    const start = c.now().getTime();
+
+    const first = search.search("same");
+    c.advance(10);
+    const second = search.search("same");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(timer.waits(), [990]);
+    timer.release();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.proposals.length, 1);
+    assert.equal(b.proposals.length, 1);
+    assert.equal(b.partial, false);
+    assert.deepEqual(mb.times, [start, start + 1000]);
+  });
+
+  it("skips a provider that already has a request waiting, so waits never stack", async () => {
+    const c = clock();
+    const mb = timedProvider("musicbrainz", c.now);
+    const dz = timedProvider("deezer", c.now);
+    const timer = manualSleep(c);
+    const log: string[] = [];
+    const search = createMetadataSearch({
+      now: c.now,
+      log: (event) => log.push(event),
+      providers: [mb.provider, dz.provider],
+      sleep: timer.sleep,
+    });
+
+    await search.search("first");
+    c.advance(10);
+    const waiting = search.search("second");
+    await new Promise((resolve) => setImmediate(resolve));
+    // Every provider has a waiter: the third request is skipped entirely.
     const third = await search.search("third");
-    assert.equal(third.partial, false);
-    assert.equal("skipped" in third, false);
-    assert.equal(third.proposals.length, 2);
-    assert.equal(mb.calls, 2);
-    assert.equal(dz.calls, 2);
+    assert.deepEqual(third, { proposals: [], partial: true, skipped: true });
+    assert.deepEqual(log, ["metadata.provider_skipped", "metadata.provider_skipped"]);
+    timer.release();
+    assert.equal((await waiting).proposals.length, 2);
+    assert.equal(mb.times.length, 2);
+  });
+
+  it("keeps the timeout over the wait", async () => {
+    const c = clock();
+    const mb = timedProvider("musicbrainz", c.now);
+    const search = createMetadataSearch({
+      now: c.now,
+      providers: [mb.provider],
+      timeoutMs: 20,
+      sleep: () => new Promise<void>(() => {}),
+    });
+    await search.search("first");
+    // The only provider never gets its turn within the budget: it failed.
+    await assert.rejects(search.search("second"), MetadataUnavailable);
+    assert.equal(mb.times.length, 1);
   });
 
   it("marks a failed provider as partial and throws when every provider failed", async () => {

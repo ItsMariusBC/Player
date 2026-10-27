@@ -89,8 +89,15 @@ export function createMetadataSearch(deps: {
   resolve?: (host: string) => Promise<string[]>;
   userAgent?: string;
   timeoutMs?: number;
+  /** Waits out a provider's rate-limit window; setTimeout by default, injected in tests. */
+  sleep?: (ms: number) => Promise<void>;
 }): MetadataSearch {
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  // Time of the last call per provider, a reserved future slot included.
   const lastRequest = new Map<string, number>();
+  // Providers with a request already waiting for its slot: a further one is skipped.
+  const waiting = new Set<string>();
   const cache = new Map<string, { proposal: Proposal; expiresAt: number }>();
 
   const prune = (now: number) => {
@@ -102,27 +109,51 @@ export function createMetadataSearch(deps: {
     }
   };
 
-  async function ask(provider: MetadataProvider, q: string): Promise<ProposalInput[]> {
+  /** Waits delayMs (the rest of the window), then calls; the timeout covers both. */
+  async function ask(
+    provider: MetadataProvider,
+    q: string,
+    delayMs: number,
+  ): Promise<ProposalInput[]> {
     const signal = AbortSignal.timeout(deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
     // A provider that ignores its signal still cannot hold the search past the timeout.
     const timeout = new Promise<never>((_, reject) => {
       signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true });
     });
-    return Promise.race([provider.search(q, signal), timeout]);
+    const run = async () => {
+      if (delayMs > 0) {
+        await sleep(delayMs);
+        waiting.delete(provider.name);
+        if (signal.aborted) throw new Error("timeout");
+      }
+      return provider.search(q, signal);
+    };
+    try {
+      return await Promise.race([run(), timeout]);
+    } finally {
+      if (delayMs > 0) waiting.delete(provider.name);
+    }
   }
 
   return {
     async search(q) {
       const startedAt = deps.now().getTime();
       const attempts = deps.providers.map(async (provider) => {
-        const last = lastRequest.get(provider.name);
-        if (last !== undefined && startedAt - last < PROVIDER_INTERVAL_MS) {
+        // One request per second per provider: a request inside the window waits for the
+        // next slot, reserved now so a concurrent one cannot take it; only a request that
+        // would queue behind a waiter is skipped.
+        if (waiting.has(provider.name)) {
           deps.log?.("metadata.provider_skipped", { provider: provider.name });
           return { skipped: true, failed: false, results: [] as ProposalInput[] };
         }
-        lastRequest.set(provider.name, startedAt);
+        const last = lastRequest.get(provider.name);
+        const slot =
+          last === undefined ? startedAt : Math.max(startedAt, last + PROVIDER_INTERVAL_MS);
+        const delayMs = slot - startedAt;
+        lastRequest.set(provider.name, slot);
+        if (delayMs > 0) waiting.add(provider.name);
         try {
-          return { skipped: false, failed: false, results: await ask(provider, q) };
+          return { skipped: false, failed: false, results: await ask(provider, q, delayMs) };
         } catch (error) {
           deps.log?.("metadata.provider_failed", {
             provider: provider.name,

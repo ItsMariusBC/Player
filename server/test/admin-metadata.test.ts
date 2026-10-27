@@ -139,19 +139,46 @@ describe("GET /api/admin/metadata/search", () => {
     }
   });
 
-  it("skips a provider called again within a second and says so with partial", async () => {
+  it("waits for the provider's next slot when called again within a second", async () => {
     setup();
     const cookie = t.loginAs("admin");
     await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
+    const before = t.now().getTime();
     const again = await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
-    assert.deepEqual(await again.json(), { proposals: [], partial: true, skipped: true });
-    t.advance(1000);
-    const later = (await (
-      await call(cookie, "GET", "/api/admin/metadata/search?q=clair")
-    ).json()) as {
-      partial: boolean;
-    };
-    assert.equal(later.partial, false);
+    const body = (await again.json()) as { proposals: unknown[]; partial: boolean; skipped?: true };
+    assert.equal(body.partial, false);
+    assert.equal(body.skipped, undefined);
+    assert.equal(body.proposals.length, 1);
+    // The injected sleep advanced the test clock by the whole window.
+    assert.equal(t.now().getTime() - before, 1000);
+  });
+
+  it("answers skipped when every provider already has a request waiting", async () => {
+    let release = () => {};
+    const cookieSetup = () => t.loginAs("admin");
+    setup();
+    t.cleanup();
+    const cover = coverFetch(imageBytes("png"));
+    t = createTestApp({
+      metadata: {
+        providers: [provider("deezer", [DEEZER_HIT])],
+        fetch: cover.fetch,
+        resolve: async () => ["93.184.216.34"],
+        sleep: () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      },
+    });
+    const cookie = cookieSetup();
+    await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
+    const waiting = call(cookie, "GET", "/api/admin/metadata/search?q=clair");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const skipped = await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
+    assert.deepEqual(await skipped.json(), { proposals: [], partial: true, skipped: true });
+    release();
+    const answered = (await (await waiting).json()) as { proposals: unknown[] };
+    assert.equal(answered.proposals.length, 1);
   });
 
   it("answers 502 provider_error when every provider failed, partial when one did", async () => {

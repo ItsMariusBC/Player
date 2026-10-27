@@ -60,6 +60,10 @@ export function MetadataDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const coolingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // StrictMode mounts, cleans up and re-mounts the effect below within the same task: the
+  // opening search must start once and survive that cycle, so teardown waits for a microtask.
+  const startedRef = useRef(false);
+  const mountedRef = useRef(false);
 
   const proposals = results?.proposals ?? [];
   const notice = search.kind === "done" && results ? metadataResultsNotice(results) : null;
@@ -99,16 +103,24 @@ export function MetadataDialog({
   // and gives the focus back to what had it, else to the track row, else to the panel.
   useEffect(() => {
     const trackId = track.id;
+    mountedRef.current = true;
     inputRef.current?.focus();
-    runSearch(metadataQuery(track));
+    if (!startedRef.current) {
+      startedRef.current = true;
+      runSearch(metadataQuery(track));
+    }
     return () => {
-      controllerRef.current?.abort();
-      if (coolingTimer.current) clearTimeout(coolingTimer.current);
-      const target =
-        (returnTarget?.isConnected ? returnTarget : null) ??
-        document.querySelector<HTMLElement>(`[data-track-id="${CSS.escape(trackId)}"]`) ??
-        document.querySelector<HTMLElement>("[data-admin-panel]");
-      target?.focus();
+      mountedRef.current = false;
+      queueMicrotask(() => {
+        if (mountedRef.current) return;
+        controllerRef.current?.abort();
+        if (coolingTimer.current) clearTimeout(coolingTimer.current);
+        const target =
+          (returnTarget?.isConnected ? returnTarget : null) ??
+          document.querySelector<HTMLElement>(`[data-track-id="${CSS.escape(trackId)}"]`) ??
+          document.querySelector<HTMLElement>("[data-admin-panel]");
+        target?.focus();
+      });
     };
   }, []);
 

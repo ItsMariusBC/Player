@@ -2,6 +2,8 @@
 
 Lecteur musical React 19, TypeScript, Vite 8 et Tailwind CSS 4. Le projet existant est conservé dans ce dépôt privé.
 
+- Lecture continue : Media Session (touches multimédia, écran de verrouillage), reprise du dernier titre et de sa position au rechargement, pré-chargement du titre suivant.
+
 ## Développement
 
 Prérequis : Node indiqué dans `.node-version`, Yarn 1.22.22 et Bun indiqué dans `.bun-version` pour les tests unitaires.

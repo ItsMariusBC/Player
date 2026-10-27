@@ -96,6 +96,7 @@ Sans session : 401 `session_required` (ou `session_expired`). Session sans le gr
 | Visualiseur         | Un seul `fill()` par image, taille suivie par `ResizeObserver`, `requestAnimationFrame` annulé au démontage.                                                                                                               |
 | Animations          | `LazyMotion` + composants `m`, fonctionnalités chargées à la demande (`lib/motion-features.ts`).                                                                                                                           |
 | Images              | Dimensions explicites, `decoding="async"`, `loading="lazy"` dans la file d'attente.                                                                                                                                        |
+| Pré-chargement      | Un second élément audio charge le titre suivant pendant la lecture ; au changement de piste les deux éléments sont échangés, sans dépendre du cache HTTP.                                                                  |
 
 ## Chorégraphie d'un changement de piste
 
@@ -106,6 +107,13 @@ Constantes dans `lib/transitions.ts`. Ordre garanti : fond, puis carte, puis not
 | 0 ms    | Gradient      | Fondu de couleurs sur 1000 ms (`useSongGradient`, interpolation RVB à ~30 i/s).               |
 | 150 ms  | Carte lecteur | Pochette, titre et artiste sortent puis entrent (350 ms).                                     |
 | 450 ms  | Notification  | `NotificationManager` retarde la notification de piste ; un second skip annule la précédente. |
+
+Côté moteur, si le titre suivant est déjà pré-chargé, `MusicManager` échange l'élément audio actif et l'élément de pré-chargement au lieu de recharger la source ; le changement est donc quasi instantané.
+
+## Media Session et reprise
+
+- Media Session : `navigator.mediaSession` expose le titre, l'artiste, l'album et la pochette du titre courant, l'état de lecture, la position, et les actions lecture, pause, précédent, suivant et déplacement (`lib/media-session.ts`). Les touches multimédia et l'écran de verrouillage pilotent donc le lecteur.
+- Reprise : `lib/resume-state.ts` enregistre le titre et la position dans `localStorage` sous la clé `player.resume.v1` (toutes les 2 s). Au chargement, le lecteur se replace sur ce titre, en pause. L'état est ignoré au-delà de 30 jours ou si le titre a disparu du catalogue ; une position sous 5 s redémarre le titre à 0.
 
 ## Événements
 

@@ -121,3 +121,29 @@ export function folderAncestors(folders: FolderNode[]): Map<string, string[]> {
   visit(folders, []);
   return result;
 }
+
+/**
+ * Opens every folder of `path` (an ancestor chain, deepest last) and closes the siblings of
+ * each one, so a single folder is open per level: the queue tree works as an accordion.
+ * `ancestors` comes from folderAncestors; folders absent from it are left as they are.
+ */
+export function openFolderPath(
+  open: ReadonlySet<string>,
+  path: readonly string[],
+  ancestors: Map<string, string[]>,
+): Set<string> {
+  const next = new Set(open);
+  const parentOf = (id: string) => {
+    const chain = ancestors.get(id);
+    return chain ? (chain[chain.length - 2] ?? null) : undefined;
+  };
+  for (const id of path) {
+    const parent = parentOf(id);
+    if (parent === undefined) continue;
+    for (const other of next) {
+      if (other !== id && parentOf(other) === parent) next.delete(other);
+    }
+    next.add(id);
+  }
+  return next;
+}

@@ -3,6 +3,7 @@ import {
   coverUrl,
   flattenCatalog,
   folderAncestors,
+  openFolderPath,
   mediaUrl,
   type Catalog,
   type FolderNode,
@@ -105,5 +106,41 @@ describe("media URLs", () => {
     expect(coverUrl("a b", "2026-10-27T10:00:00.000Z")).toBe(
       "/api/media/a%20b/cover?v=2026-10-27T10%3A00%3A00.000Z",
     );
+  });
+});
+
+describe("openFolderPath", () => {
+  const folders = [
+    {
+      id: "a",
+      name: "A",
+      position: 0,
+      children: [
+        { id: "a1", name: "A1", position: 0, children: [] },
+        { id: "a2", name: "A2", position: 1, children: [] },
+      ],
+    },
+    { id: "b", name: "B", position: 1, children: [] },
+  ];
+  const ancestors = folderAncestors(folders);
+
+  test("opens the folder and closes its siblings", () => {
+    const next = openFolderPath(new Set(["a"]), ["b"], ancestors);
+    expect([...next]).toEqual(["b"]);
+  });
+
+  test("opens a whole path, one folder per level", () => {
+    const next = openFolderPath(new Set(["b", "a2"]), ["a", "a1"], ancestors);
+    expect([...next].sort()).toEqual(["a", "a1"]);
+  });
+
+  test("keeps folders on other levels open", () => {
+    const next = openFolderPath(new Set(["a", "a1"]), ["a2"], ancestors);
+    expect([...next].sort()).toEqual(["a", "a2"]);
+  });
+
+  test("ignores unknown folders", () => {
+    const next = openFolderPath(new Set(["a"]), ["zz"], ancestors);
+    expect([...next]).toEqual(["a"]);
   });
 });

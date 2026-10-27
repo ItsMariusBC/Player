@@ -1,7 +1,7 @@
 // components/admin/admin-panel.tsx
 // Admin panel, sized and styled like the expanded visualizer (the page unmounts the rest of
 // the UI while it is shown). Folders on the left, the tracks of the selected folder in the
-// centre, the tag editor on the right. Every mutation goes through lib/admin-api, then
+// centre with the import drop zone below them, the tag editor on the right. Every mutation goes through lib/admin-api, then
 // reloads the admin catalogue and the player's one; a failure shows in the banner.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { m } from "framer-motion";
@@ -11,6 +11,7 @@ import { ContextMenu, type MenuItem } from "@/components/admin/context-menu";
 import { FolderTree } from "@/components/admin/folder-tree";
 import { TrackEditor } from "@/components/admin/track-editor";
 import { TrackTable } from "@/components/admin/track-table";
+import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
 import * as adminApi from "@/lib/admin-api";
 import {
   INBOX_LABEL,
@@ -22,6 +23,8 @@ import {
 } from "@/lib/admin-format";
 import { performLogout } from "@/lib/api";
 import { useAdminCatalog } from "@/lib/hooks/use-admin-catalog";
+import { useImportQueue } from "@/lib/hooks/use-import-queue";
+import { entryLabel } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
 type MenuState =
@@ -73,6 +76,46 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
 
   useEffect(() => {
     firstItemRef.current?.focus();
+  }, []);
+
+  // Without the limit, files go to the server unchecked and a 413 still reads « Trop volumineux ».
+  const [maxUploadBytes, setMaxUploadBytes] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    adminApi
+      .getLimits()
+      .then(({ maxUploadBytes: limit }) => {
+        if (active) setMaxUploadBytes(limit);
+      })
+      .catch((error: unknown) => {
+        if (active) showError(error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [showError]);
+
+  const onImported = useCallback(() => {
+    Promise.all([refreshAdmin(), onCatalogChanged()]).catch(showError);
+  }, [refreshAdmin, onCatalogChanged, showError]);
+  const imports = useImportQueue({ maxUploadBytes, onReady: onImported });
+
+  // A file dropped beside the zone must not replace the app with the audio file.
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (!hasFiles(event) || event.defaultPrevented) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    };
+    const onDrop = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault();
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
   }, []);
 
   useEffect(() => {
@@ -353,14 +396,34 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
 
         <section
           aria-label={buildFolderPathLabel(folders, folderId)}
-          className="min-w-0 flex-1 md:overflow-y-auto"
+          className="flex min-w-0 flex-1 flex-col gap-4 md:overflow-hidden"
         >
-          <TrackTable
-            tracks={visibleTracks}
-            selectedId={selectedTrack?.id ?? null}
-            onSelect={selectTrack}
-            onTrackMenu={(id, x, y) => setMenu({ kind: "track", id, x, y, step: "main" })}
-          />
+          <div className="min-h-0 flex-1 md:overflow-y-auto">
+            <TrackTable
+              tracks={visibleTracks}
+              selectedId={selectedTrack?.id ?? null}
+              onSelect={selectTrack}
+              onTrackMenu={(id, x, y) => setMenu({ kind: "track", id, x, y, step: "main" })}
+            />
+          </div>
+          <div className="shrink-0">
+            <UploadZone
+              entries={imports.entries}
+              idle={imports.idle}
+              labelOf={(entry) =>
+                entryLabel(entry, {
+                  maxUploadBytes,
+                  titleOf: (id) => tracks.find((track) => track.id === id)?.title,
+                })
+              }
+              onFiles={imports.addFiles}
+              onShow={(trackId) => {
+                selectFolder(null);
+                selectTrack(trackId);
+              }}
+              onClear={imports.clear}
+            />
+          </div>
         </section>
 
         <aside className="shrink-0 md:w-80 md:overflow-y-auto">

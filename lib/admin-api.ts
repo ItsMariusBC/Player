@@ -164,3 +164,8 @@ export function listImports(limit?: number): Promise<ImportDto[]> {
   const query = limit === undefined ? "" : `?limit=${limit}`;
   return api<ImportDto[]>(`/api/admin/imports${query}`);
 }
+
+/** Upload size accepted by the server (MAX_UPLOAD_MB), to refuse a file before sending it. */
+export function getLimits(): Promise<{ maxUploadBytes: number }> {
+  return api<{ maxUploadBytes: number }>("/api/admin/limits");
+}

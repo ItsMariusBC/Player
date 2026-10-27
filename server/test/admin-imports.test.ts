@@ -130,6 +130,20 @@ describe("admin imports", () => {
     assert.equal((t.db.prepare("SELECT COUNT(*) AS n FROM imports").get() as any).n, 0);
   });
 
+  it("exposes the upload limit to admins only", async () => {
+    t = createTestApp({ env: { MAX_UPLOAD_MB: "3" } });
+    const res = await t.app.request("/api/admin/limits", {
+      headers: { cookie: t.loginAs("admin") },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { maxUploadBytes: 3 * 1024 * 1024 });
+    const forbidden = await t.app.request("/api/admin/limits", {
+      headers: { cookie: t.loginAs("user") },
+    });
+    assert.equal(forbidden.status, 403);
+    assert.equal((await t.app.request("/api/admin/limits")).status, 401);
+  });
+
   it("forbids the user role and missing CSRF header, requires a session", async () => {
     t = createTestApp();
     const data = wavFile();

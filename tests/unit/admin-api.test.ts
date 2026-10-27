@@ -5,6 +5,7 @@ import {
   deleteFolder,
   deleteTrack,
   getImport,
+  getLimits,
   listImports,
   replaceCover,
   updateFolder,
@@ -107,6 +108,12 @@ describe("track calls", () => {
 });
 
 describe("import calls", () => {
+  test("getLimits reads the upload limit", async () => {
+    const calls = stubFetch(200, { maxUploadBytes: 1024 });
+    expect(await getLimits()).toEqual({ maxUploadBytes: 1024 });
+    expect(calls[0]?.url).toBe("/api/admin/limits");
+  });
+
   test("getImport and listImports", async () => {
     const calls = stubFetch(200, []);
     await getImport("i 1");

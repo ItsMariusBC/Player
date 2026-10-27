@@ -5,7 +5,7 @@ import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middl
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { ImportQueue } from "./admin/imports.ts";
 import { adminFolderRoutes } from "./routes/admin-folders.ts";
-import { adminImportRoutes } from "./routes/admin-imports.ts";
+import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
 import { adminTrackRoutes } from "./routes/admin-tracks.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
@@ -74,6 +74,7 @@ export function createApp(deps: AppDeps) {
   app.route("/api/media", mediaRoutes(deps, session));
 
   app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
+  app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
   app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
   app.route("/api/admin/tracks", adminTrackRoutes({ ...deps, now }, session));
 

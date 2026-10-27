@@ -92,3 +92,14 @@ export function adminImportRoutes(
 
   return routes;
 }
+
+/** GET /api/admin/limits: lets the panel refuse oversized files before sending them. */
+export function adminLimitsRoutes(
+  deps: { config: AppConfig },
+  session: MiddlewareHandler<AuthEnv>,
+) {
+  const routes = new Hono<AuthEnv>();
+  routes.use("*", session, requireAdmin);
+  routes.get("/", (c) => c.json({ maxUploadBytes: deps.config.maxUploadBytes }));
+  return routes;
+}

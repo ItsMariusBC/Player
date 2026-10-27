@@ -86,8 +86,10 @@ describe("GET /api/catalog", () => {
         "format",
         "hasCover",
         "id",
+        "loudnessLufs",
         "position",
         "title",
+        "truePeakDbtp",
         "updatedAt",
       ]);
       assert.equal(inA[0]?.updatedAt, now.toISOString());

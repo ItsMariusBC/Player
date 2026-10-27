@@ -132,6 +132,13 @@ Après un déploiement, avec Authentik réel :
 6. Supprimer le titre de test et le dossier de test.
 7. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
 
+### Recette des demandes de sons
+
+1. Avec un compte du groupe `users` : « Demander un son » sous la file d'attente ouvre le modal ; saisir un titre puis « Demander » affiche « Demande envoyée » et la ligne « En attente » dans « Mes demandes ».
+2. Avec un compte `admin`, onglet « Demandes » du panneau : la demande apparaît ; « Valider » la passe à « Validée », « Supprimer » puis « Oui » la retire.
+3. De retour côté utilisateur : la demande validée affiche « Validée », la demande supprimée a disparu.
+4. Avec un compte `users` : `GET /api/admin/requests` renvoie 403 `admin_required`.
+
 ## Promotion et retour arrière
 
 Ouvrir une PR de `developpment` vers `production`, attendre `CI required`, puis fusionner. Les deux branches exigent ce contrôle à jour et la résolution des conversations ; les force-push et suppressions sont refusés. Aucun autre approbateur n’est imposé sur ce dépôt personnel.

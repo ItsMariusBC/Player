@@ -64,7 +64,13 @@ export function createMediaStorage(dataDir: string): MediaStorage {
       await rm(trackDir(trackId), { recursive: true, force: true });
     },
     async publish(importId, trackId, file, ext, cover) {
-      safeId(importId);
+      const relative = path.relative(
+        path.resolve(incomingRoot, safeId(importId)),
+        path.resolve(file),
+      );
+      if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("file outside incoming directory");
+      }
       const target = storage.originalPath(trackId, ext);
       if (cover) storage.coverPath(trackId, cover.ext);
       await mkdir(trackDir(trackId), { recursive: true });

@@ -83,13 +83,43 @@ describe("createMediaStorage", () => {
     assert.equal(fs.existsSync(storage.coverPath("t2", "jpg")), false);
   });
 
-  it("removes the media dir when publishing fails after the rename", async () => {
+  it("validates the cover extension before any side effect", async () => {
     const storage = createMediaStorage(path.join(dir, "data3"));
     const file = path.join(storage.incomingDir("imp3"), "u.wav");
     writeWav(file, 1);
-    const boom = { data: Buffer.from("x"), ext: "../../x" as "png" };
-    await assert.rejects(storage.publish("imp3", "t3", file, "wav", boom));
+    const bad = { data: Buffer.from("x"), ext: "../../x" as "png" };
+    await assert.rejects(storage.publish("imp3", "t3", file, "wav", bad), /invalid extension/);
     assert.equal(fs.existsSync(path.dirname(storage.originalPath("t3", "wav"))), false);
+    assert.ok(fs.existsSync(file), "source untouched");
+  });
+
+  it("removes the media dir when the cover write fails after the rename", async () => {
+    const storage = createMediaStorage(path.join(dir, "data5"));
+    const file = path.join(storage.incomingDir("imp5"), "u.wav");
+    writeWav(file, 1);
+    // A directory where the cover file goes makes writeFile fail after the rename.
+    const mediaDir = path.dirname(storage.originalPath("t5", "wav"));
+    fs.mkdirSync(storage.coverPath("t5", "png"), { recursive: true });
+    await assert.rejects(
+      storage.publish("imp5", "t5", file, "wav", { data: Buffer.from("x"), ext: "png" }),
+      (error) => (error as NodeJS.ErrnoException).code === "EISDIR",
+    );
+    // The renamed original is removed with the media dir (incoming was already consumed).
+    assert.equal(fs.existsSync(mediaDir), false);
+    assert.equal(fs.existsSync(file), false);
+  });
+
+  it("refuses a source outside the incoming directory", async () => {
+    const storage = createMediaStorage(path.join(dir, "data6"));
+    storage.incomingDir("imp6");
+    const outside = path.join(dir, "outside.wav");
+    writeWav(outside, 1);
+    await assert.rejects(
+      storage.publish("imp6", "t6", outside, "wav", null),
+      /file outside incoming directory/,
+    );
+    assert.ok(fs.existsSync(outside));
+    assert.equal(fs.existsSync(path.dirname(storage.originalPath("t6", "wav"))), false);
   });
 
   it("rejects unsafe ids", async () => {

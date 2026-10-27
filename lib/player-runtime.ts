@@ -4,6 +4,7 @@
 import { createMusicManager, MusicManager } from "@/lib/music-manager";
 import { createPlaybackController, PlaybackController } from "@/lib/playback-controller";
 import { createNotificationManager, NotificationManager } from "@/lib/notification-manager";
+import { bindMediaSession } from "@/lib/media-session";
 import { createShortcutManager, ShortcutManager } from "@/lib/shortcut-manager";
 
 export interface PlayerRuntime {
@@ -27,6 +28,7 @@ export function createPlayerRuntime(options: PlayerRuntimeOptions = {}): PlayerR
     onToggleMiniPlayer: options.onToggleMiniPlayer,
   });
   shortcuts.bind();
+  const unbindMediaSession = bindMediaSession({ music, playback });
 
   return {
     music,
@@ -34,6 +36,7 @@ export function createPlayerRuntime(options: PlayerRuntimeOptions = {}): PlayerR
     notifications,
     shortcuts,
     destroy() {
+      unbindMediaSession();
       shortcuts.destroy();
       notifications.destroy();
       music.destroy();

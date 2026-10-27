@@ -255,3 +255,85 @@ describe("ingestFile race", () => {
     });
   });
 });
+
+describe("admin imports into a folder", () => {
+  const send = (cookie: string, build: (form: FormData) => void) => {
+    const form = new FormData();
+    build(form);
+    return t.app.request("/api/admin/imports", {
+      method: "POST",
+      body: form,
+      headers: { cookie, "X-Requested-With": "player" },
+    });
+  };
+  const addFolder = () =>
+    t.db.prepare("INSERT INTO folders (id, name, created_at) VALUES ('f1', 'Rock', 'x')").run();
+  const blob = () => new Blob([new Uint8Array(wavFile())]);
+
+  it("stores the folder of a folderId sent before the file", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    addFolder();
+    const res = await send(cookie, (form) => {
+      form.set("folderId", "f1");
+      form.set("file", blob(), "song.wav");
+    });
+    assert.equal(res.status, 202);
+    const { importId } = (await res.json()) as { importId: string };
+    await t.imports.idle();
+    const imp = t.db.prepare("SELECT * FROM imports WHERE id = ?").get(importId) as any;
+    assert.equal(imp.folder_id, "f1");
+    assert.equal(imp.state, "ready");
+    const track = t.db
+      .prepare("SELECT folder_id FROM tracks WHERE id = ?")
+      .get(imp.track_id) as any;
+    assert.equal(track.folder_id, "f1");
+  });
+
+  it("answers 400 bad_request for an unknown folder and leaves nothing behind", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    const res = await send(cookie, (form) => {
+      form.set("folderId", "nope");
+      form.set("file", blob(), "song.wav");
+    });
+    assert.equal(res.status, 400);
+    assert.equal(((await res.json()) as any).error.code, "bad_request");
+    assert.equal((t.db.prepare("SELECT COUNT(*) AS n FROM imports").get() as any).n, 0);
+    assert.ok(incomingEmpty());
+  });
+
+  it("ignores a folderId sent after the file (parts are read in order)", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    addFolder();
+    const res = await send(cookie, (form) => {
+      form.set("file", blob(), "song.wav");
+      form.set("folderId", "f1");
+    });
+    assert.equal(res.status, 202);
+    const { importId } = (await res.json()) as { importId: string };
+    await t.imports.idle();
+    const imp = t.db.prepare("SELECT folder_id FROM imports WHERE id = ?").get(importId) as any;
+    assert.equal(imp.folder_id, null);
+  });
+
+  it("falls back to the inbox when the folder is deleted before the import runs", async () => {
+    t = createTestApp();
+    const cookie = t.loginAs("admin");
+    addFolder();
+    const res = await send(cookie, (form) => {
+      form.set("folderId", "f1");
+      form.set("file", blob(), "song.wav");
+    });
+    const { importId } = (await res.json()) as { importId: string };
+    t.db.prepare("DELETE FROM folders WHERE id = 'f1'").run();
+    await t.imports.idle();
+    const imp = t.db.prepare("SELECT * FROM imports WHERE id = ?").get(importId) as any;
+    assert.equal(imp.state, "ready");
+    const track = t.db
+      .prepare("SELECT folder_id FROM tracks WHERE id = ?")
+      .get(imp.track_id) as any;
+    assert.equal(track.folder_id, null);
+  });
+});

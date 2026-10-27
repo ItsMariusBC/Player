@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { isIP } from "node:net";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { ImportQueue } from "../admin/imports.ts";
@@ -17,6 +18,21 @@ interface ImportRow {
   track_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+const MAX_URL_LENGTH = 2048;
+
+/** Last path segment, decoded, with anything outside [\w.-] replaced; "download" when empty. */
+function filenameFromUrl(url: URL): string {
+  const segment = url.pathname.split("/").filter(Boolean).pop() ?? "";
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // Keep the raw segment.
+  }
+  const name = decoded.replace(/[^\w.-]/g, "_").slice(0, 120);
+  return name === "" || /^\.+$/.test(name) ? "download" : name;
 }
 
 const toDto = (row: ImportRow) => ({
@@ -42,10 +58,13 @@ export function adminImportRoutes(
   const routes = new Hono<AuthEnv>();
   routes.use("*", session, requireAdmin);
 
+  const folderExists = (id: string) =>
+    deps.db.prepare("SELECT 1 FROM folders WHERE id = ?").get(id) !== undefined;
+
   routes.post("/", async (c) => {
     const importId = crypto.randomUUID();
     const dir = deps.storage.incomingDir(importId);
-    const { outcome, filename } = await receive(
+    const { outcome, filename, folderId } = await receive(
       c.req.raw,
       path.join(dir, "upload.bin"),
       deps.config.maxUploadBytes,
@@ -58,18 +77,57 @@ export function adminImportRoutes(
       const message = outcome === "no_file" ? "Missing file field" : "Invalid multipart body";
       return jsonError(c, 400, "bad_request", message);
     }
+    if (folderId !== null && !folderExists(folderId)) {
+      await deps.storage.removeIncoming(importId);
+      return jsonError(c, 400, "bad_request", "Unknown folder");
+    }
     const stamp = deps.now().toISOString();
     try {
       deps.db
         .prepare(
-          "INSERT INTO imports (id, user_id, filename, state, error, track_id, created_at, updated_at) VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?)",
+          "INSERT INTO imports (id, user_id, filename, state, error, track_id, folder_id, created_at, updated_at) VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?, ?)",
         )
-        .run(importId, c.get("user").id, filename, stamp, stamp);
+        .run(importId, c.get("user").id, filename, folderId, stamp, stamp);
     } catch (error) {
       await deps.storage.removeIncoming(importId);
       throw error;
     }
     deps.imports.enqueue(importId);
+    return c.json({ importId }, 202);
+  });
+
+  routes.post("/url", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      url?: unknown;
+      folderId?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") return jsonError(c, 400, "bad_request", "Invalid body");
+    const { url: raw, folderId } = body;
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > MAX_URL_LENGTH) {
+      return jsonError(c, 400, "bad_request", "Invalid url");
+    }
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return jsonError(c, 400, "bad_request", "Invalid url");
+    }
+    if (url.protocol !== "https:" || isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0) {
+      return jsonError(c, 400, "bad_request", "Only https URLs with a host name are accepted");
+    }
+    if (folderId !== undefined && folderId !== null) {
+      if (typeof folderId !== "string" || !folderExists(folderId)) {
+        return jsonError(c, 400, "bad_request", "Unknown folder");
+      }
+    }
+    const importId = crypto.randomUUID();
+    const stamp = deps.now().toISOString();
+    deps.db
+      .prepare(
+        "INSERT INTO imports (id, user_id, filename, state, error, track_id, folder_id, source_url, created_at, updated_at) VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?, ?, ?)",
+      )
+      .run(importId, c.get("user").id, filenameFromUrl(url), folderId ?? null, raw, stamp, stamp);
+    deps.imports.enqueueUrl(importId, raw);
     return c.json({ importId }, 202);
   });
 

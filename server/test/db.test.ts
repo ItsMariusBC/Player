@@ -6,7 +6,7 @@ import { migrate } from "../src/migrations.ts";
 describe("database", () => {
   it("applies migrations once and is idempotent", () => {
     const db = openDatabase(":memory:");
-    assert.equal(migrate(db), 5);
+    assert.equal(migrate(db), 6);
     assert.equal(migrate(db), 0);
     db.close();
   });
@@ -121,6 +121,36 @@ describe("tracks loudness columns", () => {
     };
     assert.equal(row.loudness_lufs, null);
     assert.equal(row.true_peak_dbtp, null);
+    db.close();
+  });
+});
+
+describe("imports folder and source columns", () => {
+  it("are created by migration 6, accept NULL and null the folder on delete", () => {
+    const db = openDatabase(":memory:");
+    migrate(db);
+    const names = (db.prepare("PRAGMA table_info(imports)").all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    assert.ok(names.includes("folder_id"));
+    assert.ok(names.includes("source_url"));
+    db.prepare(
+      "INSERT INTO users (id, issuer, subject, created_at, last_seen_at) VALUES ('u', 'i', 's', 'a', 'a')",
+    ).run();
+    db.prepare("INSERT INTO folders (id, name, created_at) VALUES ('f', 'F', 'a')").run();
+    db.prepare(
+      "INSERT INTO imports (id, user_id, filename, state, folder_id, source_url, created_at, updated_at) VALUES ('i1', 'u', 'a.wav', 'processing', 'f', 'https://x/a.wav', 'a', 'a')",
+    ).run();
+    db.prepare(
+      "INSERT INTO imports (id, user_id, filename, state, created_at, updated_at) VALUES ('i2', 'u', 'b.wav', 'processing', 'a', 'a')",
+    ).run();
+    db.prepare("DELETE FROM folders WHERE id = 'f'").run();
+    const rows = db
+      .prepare("SELECT id, folder_id, source_url FROM imports ORDER BY id")
+      .all() as any[];
+    assert.equal(rows[0].folder_id, null);
+    assert.equal(rows[0].source_url, "https://x/a.wav");
+    assert.equal(rows[1].source_url, null);
     db.close();
   });
 });

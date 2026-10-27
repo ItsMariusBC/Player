@@ -32,6 +32,8 @@ const track = (
   format: "mp3",
   hasCover,
   position,
+  loudnessLufs: null,
+  truePeakDbtp: null,
   updatedAt: "2026-10-27T00:00:00.000Z",
 });
 
@@ -73,6 +75,7 @@ describe("flattenCatalog", () => {
       folderId: "A1",
       folderPath: ["Folder A", "Folder A1"],
       updatedAt: "2026-10-27T00:00:00.000Z",
+      gainDb: 0,
     });
     const withoutCover = flattenCatalog(catalog).find((s) => s.id === "a1");
     expect(withoutCover && "picture" in withoutCover).toBe(false);
@@ -142,5 +145,24 @@ describe("openFolderPath", () => {
   test("ignores unknown folders", () => {
     const next = openFolderPath(new Set(["a"]), ["zz"], ancestors);
     expect([...next]).toEqual(["a"]);
+  });
+});
+
+describe("Song.gainDb", () => {
+  const one = (extra: Partial<TrackDto>): number => {
+    const dto = { ...track("g", null, 0), ...extra };
+    return flattenCatalog({ folders: [], tracks: [dto] })[0]!.gainDb;
+  };
+  test("0 dB for an unmeasured track", () => {
+    expect(one({})).toBe(0);
+  });
+  test("0 dB when the server omits the fields", () => {
+    const dto = track("g", null, 0) as Partial<TrackDto>;
+    delete dto.loudnessLufs;
+    delete dto.truePeakDbtp;
+    expect(flattenCatalog({ folders: [], tracks: [dto as TrackDto] })[0]!.gainDb).toBe(0);
+  });
+  test("target minus loudness for a measured track", () => {
+    expect(one({ loudnessLufs: -20, truePeakDbtp: -10 })).toBe(6);
   });
 });

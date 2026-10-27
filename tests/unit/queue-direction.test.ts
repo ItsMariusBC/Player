@@ -26,6 +26,7 @@ const song = (id: string): Song => ({
   folderId: null,
   folderPath: [],
   updatedAt: "2026-10-27T00:00:00.000Z",
+  gainDb: 0,
 });
 
 function setup() {

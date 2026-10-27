@@ -18,6 +18,7 @@ const song = (picture?: string): Song => ({
   folderId: null,
   folderPath: [],
   updatedAt: "2026-01-01",
+  gainDb: 0,
 });
 
 function setup() {

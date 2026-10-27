@@ -19,6 +19,8 @@ export interface AppConfig {
   };
   trustProxy: boolean;
   maxUploadBytes: number;
+  /** Free space under DATA_DIR below which the health check reports degraded. */
+  minFreeBytes: number;
   /** Hours between maintenance passes; 0 disables the schedule. */
   maintenanceIntervalHours: number;
   /** Dev-only login bypass, always false in production. */
@@ -67,6 +69,16 @@ function parseMaxUploadBytes(env: Env): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
     throw new ConfigError(`MAX_UPLOAD_MB must be a positive integer, got "${raw}"`);
+  }
+  return value * BYTES_PER_MB;
+}
+
+function parseMinFreeBytes(env: Env): number {
+  const raw = env.MIN_FREE_MB?.trim();
+  if (!raw) return 500 * BYTES_PER_MB;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`MIN_FREE_MB must be a positive integer, got "${raw}"`);
   }
   return value * BYTES_PER_MB;
 }
@@ -162,6 +174,7 @@ export function loadConfig(env: Env): AppConfig {
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
     maxUploadBytes: parseMaxUploadBytes(env),
+    minFreeBytes: parseMinFreeBytes(env),
     maintenanceIntervalHours: parseMaintenanceIntervalHours(env),
     devBypass: parseDevBypass(env, nodeEnv, appUrl),
   };

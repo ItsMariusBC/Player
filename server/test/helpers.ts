@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createImportQueue } from "../src/admin/imports.ts";
+import { createHealth, type StatfsFn } from "../src/health.ts";
 import { createMaintenance } from "../src/admin/maintenance.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
@@ -25,6 +26,11 @@ export interface TestAppOptions {
   measure?: (file: string) => Promise<Loudness | null>;
   /** Whether ffmpeg counts as available (default true). */
   ffmpegAvailable?: boolean;
+  /** Disk stats used by the health check; defaults to plenty of free space. */
+  statfs?: StatfsFn;
+  version?: string;
+  /** Migrations the code is expected to have applied (default: all of them). */
+  migrationsExpected?: number;
   /** Leaves `metadata` out of the app deps, as when no provider is configured. */
   withoutMetadata?: boolean;
   /** Import by URL: fetch/resolve for the download; nothing reaches the network. */
@@ -103,6 +109,24 @@ export function createTestApp(opts: TestAppOptions = {}) {
     },
   });
   const maintenance = createMaintenance({ db, storage, now: clock, log: logger });
+  const health = createHealth({
+    db,
+    dataDir: tempDir,
+    statfs:
+      opts.statfs ??
+      (async () => ({
+        bsize: 1024,
+        blocks: 1_000_000_000,
+        bavail: 500_000_000,
+      })),
+    minFreeBytes: config.minFreeBytes,
+    version: opts.version ?? "0.0.0-test",
+    startedAt: clock(),
+    ffmpegAvailable: async () => (await imports.loudnessStatus()).available,
+    maintenance,
+    migrationsExpected: opts.migrationsExpected,
+    now: clock,
+  });
   const metadata = createMetadataSearch({
     providers: opts.metadata?.providers ?? [],
     now: clock,
@@ -123,6 +147,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     storage,
     imports,
     maintenance,
+    health,
     now: clock,
     staticDir: opts.staticDir,
     mount: opts.mount,

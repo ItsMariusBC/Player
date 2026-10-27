@@ -5,6 +5,8 @@ import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middl
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { ImportQueue } from "./admin/imports.ts";
 import type { Maintenance } from "./admin/maintenance.ts";
+import type { Health } from "./health.ts";
+import { adminHealthRoutes } from "./routes/admin-health.ts";
 import { adminMaintenanceRoutes } from "./routes/admin-maintenance.ts";
 import { adminFolderRoutes } from "./routes/admin-folders.ts";
 import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
@@ -34,6 +36,8 @@ export interface AppDeps {
   metadata?: MetadataSearch;
   /** Maintenance passes; its admin routes are not mounted when omitted. */
   maintenance?: Maintenance;
+  /** Health evaluation; `/healthz` answers a bare ok and the admin route is absent when omitted. */
+  health?: Health;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -62,7 +66,14 @@ export function createApp(deps: AppDeps) {
     return jsonError(c, 500, "internal_error", "Unexpected server error");
   });
 
-  app.get("/healthz", (c) => c.text("ok\n"));
+  app.get("/healthz", async (c) => {
+    const report = deps.health ? await deps.health.evaluate() : null;
+    if (report && report.status !== "ok") {
+      c.header("Cache-Control", "no-store");
+      return c.text("degraded\n", 503);
+    }
+    return c.text("ok\n");
+  });
 
   app.use("/api/*", requireRequestedWith);
 
@@ -92,6 +103,9 @@ export function createApp(deps: AppDeps) {
       "/api/admin/maintenance",
       adminMaintenanceRoutes({ db: deps.db, maintenance: deps.maintenance, now }, session),
     );
+  }
+  if (deps.health) {
+    app.route("/api/admin/health", adminHealthRoutes({ health: deps.health }, session));
   }
   app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
   app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));

@@ -401,7 +401,6 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     >
       <header className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-6">
-          <h2 className="text-sm uppercase tracking-widest text-purple-200/70">Administration</h2>
           <div
             role="tablist"
             aria-label="Vue"
@@ -593,7 +592,7 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   );
 }
 
-function CloseIcon() {
+export function CloseIcon() {
   return (
     <svg
       width={14}

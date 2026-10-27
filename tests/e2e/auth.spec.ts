@@ -22,8 +22,9 @@ test("admin opens the admin panel and closes it with Escape", async ({ page }) =
 
   const expand = page.locator('button[aria-label="Agrandir le visualiseur"]');
   await expect(expand).toBeVisible();
-  await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Administration" })).toBeVisible();
+  // Admins log out from the panel: no bare « Se déconnecter » beside the button.
+  await expect(page.getByRole("button", { name: "Se déconnecter" })).toHaveCount(0);
 
   const activate = page.getByRole("button", { name: "Activer le lecteur" });
   if (await activate.isVisible()) await activate.click();

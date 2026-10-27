@@ -38,6 +38,7 @@ export default function MusicPlayer() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
+  const closeRequest = useCallback(() => setRequestOpen(false), []);
   const focusMode = visualizerExpanded || adminOpen;
   // Server catalogue. `queued` is the catalogue currently loaded in the queue:
   // the player renders only once the first one is in, so no empty-queue flash.
@@ -56,6 +57,18 @@ export default function MusicPlayer() {
     adminWasOpen.current = false;
     document.querySelector<HTMLElement>("[data-admin-button]")?.focus();
   }, [adminOpen]);
+
+  // Same for « Demander un son », unmounted while its stage is open.
+  const requestWasOpen = useRef(false);
+  useEffect(() => {
+    if (requestOpen) {
+      requestWasOpen.current = true;
+      return;
+    }
+    if (!requestWasOpen.current) return;
+    requestWasOpen.current = false;
+    document.querySelector<HTMLElement>("[data-request-button]")?.focus();
+  }, [requestOpen]);
 
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
@@ -181,6 +194,9 @@ export default function MusicPlayer() {
             <VisualizerStage analyser={runtime.music.analyser} onClose={closeVisualizer} />
           ) : (
           <div className="w-full max-w-6xl mx-auto">
+            {requestOpen ? (
+              <SongRequestDialog onClose={closeRequest} />
+            ) : (
             <div className="grid md:grid-cols-12 gap-8">
               <div className="md:col-span-8">
                 <div>
@@ -198,6 +214,7 @@ export default function MusicPlayer() {
                   </div>
                   <button
                     type="button"
+                    data-request-button=""
                     className={cn(buttonVariants({ variant: "ghost" }), "shrink-0 w-full mt-3")}
                     onClick={() => setRequestOpen(true)}
                   >
@@ -206,6 +223,7 @@ export default function MusicPlayer() {
                 </div>
               </div>
             </div>
+            )}
           </div>
           )}
           
@@ -234,7 +252,6 @@ export default function MusicPlayer() {
             </>
           )}
           <ProgressBar music={runtime.music} playback={runtime.playback} />
-          {requestOpen && !focusMode && <SongRequestDialog onClose={() => setRequestOpen(false)} />}
 
           {/* Mini-player */}
           <AnimatePresence>

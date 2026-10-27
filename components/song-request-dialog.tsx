@@ -1,11 +1,13 @@
 // components/song-request-dialog.tsx
-// « Demander un son »: a modal layer above the player. Searches the providers like the admin
-// metadata dialog, sends the chosen proposal (or the typed title) and lists the user's requests.
-// Escape closes this dialog, not what is behind it (stopped in the capture phase).
+// « Demander un son »: takes the place of the visualizer and the queue (same footprint,
+// styled like the admin panel). Searches the providers like the admin metadata dialog, sends
+// the chosen proposal (or the typed title) and lists the user's requests on the right.
+// Escape closes it (captured, so nothing behind it reacts).
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { m } from "framer-motion";
+import { CloseIcon } from "@/components/admin/admin-panel";
 import { inputClass } from "@/components/admin/folder-tree";
+import { PanelButton } from "@/components/visualizer-panel";
 import { buttonVariants } from "@/components/ui/button";
 import {
   METADATA_SEARCH_COOLDOWN_MS,
@@ -40,10 +42,8 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState<SearchStatus>({ kind: "idle" });
   const [results, setResults] = useState<MetadataResults | null>(null);
   const [cooling, setCooling] = useState(false);
-  // Read during the first render, before the dialog moves the focus into itself.
-  const [returnTarget] = useState(() => document.activeElement as HTMLElement | null);
   // StrictMode mounts, cleans up and re-mounts the effect below within the same task: the
-  // focus must only go back to the opener on the real unmount, so teardown waits a microtask.
+  // in-flight calls must only be dropped on the real unmount, so teardown waits a microtask.
   const mountedRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -90,8 +90,8 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
       });
   };
 
-  // Focuses the field and loads « Mes demandes » once. On close: aborts what is in flight and
-  // gives the focus back to the opener.
+  // Focuses the field and loads « Mes demandes » once. On close: aborts what is in flight
+  // (player.tsx gives the focus back to the opener once it is mounted again).
   useEffect(() => {
     const loadController = new AbortController();
     mountedRef.current = true;
@@ -112,7 +112,6 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
         if (mountedRef.current) return;
         controllerRef.current?.abort();
         if (coolingTimer.current) clearTimeout(coolingTimer.current);
-        if (returnTarget?.isConnected) returnTarget.focus();
       });
     };
   }, []);
@@ -197,34 +196,29 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
   const showCover = (proposal: Proposal) =>
     proposal.coverUrl !== null && !brokenCovers.has(proposal.id);
 
-  return createPortal(
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-      <m.div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="song-request-dialog-title"
-        className="flex max-h-full w-full max-w-xl flex-col gap-4 overflow-hidden rounded-xl border border-purple-100/10 bg-purple-950/95 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.45)] md:p-6"
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.15 }}
-      >
-        <header className="flex items-center justify-between gap-4">
-          <h3
-            id="song-request-dialog-title"
-            className="text-sm uppercase tracking-widest text-purple-200/70"
-          >
-            Demander un son
-          </h3>
-          <button
-            type="button"
-            className={cn(buttonVariants({ variant: "ghost" }), "px-2")}
-            onClick={onClose}
-          >
-            Fermer
-          </button>
-        </header>
+  return (
+    <m.div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Demander un son"
+      data-request-panel=""
+      tabIndex={-1}
+      className="flex max-h-[80svh] w-full flex-col focus:outline-hidden overflow-hidden rounded-2xl border border-purple-100/10 bg-purple-950/25 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] md:h-[500px] md:p-6"
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.9 }}
+    >
+      <header className="flex items-center justify-between gap-4">
+        <h2 className="text-sm uppercase tracking-widest text-purple-200/70">Demander un son</h2>
+        <PanelButton label="Fermer la demande" onClick={onClose}>
+          <CloseIcon />
+        </PanelButton>
+      </header>
 
+      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden">
+        <section aria-label="Recherche d'un titre" className="flex min-w-0 flex-1 flex-col gap-4 md:overflow-hidden">
         <form
           role="search"
           className="flex gap-2"
@@ -255,8 +249,7 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
           </button>
         </form>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-          <div>
+        <div className="min-h-0 flex-1 md:overflow-y-auto">
             <div aria-live="polite" aria-busy={search.kind === "loading"}>
             {search.kind === "loading" && (
               <p
@@ -340,7 +333,7 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={sending || (!selected && !queryValid)}
@@ -360,14 +353,15 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
               </p>
             )}
           </div>
+        </section>
 
-          <section aria-labelledby="song-request-mine" className="flex flex-col gap-2">
-            <h4
+        <aside aria-labelledby="song-request-mine" className="flex shrink-0 flex-col gap-2 md:w-80 md:overflow-y-auto">
+            <h3
               id="song-request-mine"
               className="text-xs uppercase tracking-widest text-purple-200/70"
             >
               Mes demandes
-            </h4>
+            </h3>
             {requestsError && (
               <p role="alert" className="text-sm text-red-200">
                 {requestsError}
@@ -419,10 +413,8 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
                 })}
               </ul>
             )}
-          </section>
-        </div>
-      </m.div>
-    </div>,
-    document.body,
+        </aside>
+      </div>
+    </m.div>
   );
 }

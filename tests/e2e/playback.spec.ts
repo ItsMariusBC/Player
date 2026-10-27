@@ -32,9 +32,20 @@ async function currentTitle(page: Page): Promise<string> {
 
 async function seekToPercent(page: Page, percent: number) {
   const slider = page.getByRole("slider", { name: "Progression de la lecture" });
-  const box = await slider.boundingBox();
-  if (!box) throw new Error("progress bar has no box");
-  await slider.click({ position: { x: (box.width * percent) / 100, y: 2 } });
+  // The progress only moves once the duration is known (metadata loaded): a click
+  // before that is dropped. Click again inside the poll until it lands.
+  await expect
+    .poll(
+      async () => {
+        if ((await sliderValue(page)) < percent - 5) {
+          const box = await slider.boundingBox();
+          if (box) await slider.click({ position: { x: (box.width * percent) / 100, y: 2 } });
+        }
+        return sliderValue(page);
+      },
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThanOrEqual(percent - 5);
 }
 
 const sliderValue = async (page: Page) =>
@@ -86,6 +97,8 @@ test("the Media Session metadata follows the current track", async ({ page }) =>
 
 test("the next track is requested while the current one plays", async ({ page }) => {
   test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await startPlayer(page);
   await ensurePlaying(page);
   const title = await currentTitle(page);
@@ -109,4 +122,14 @@ test("the next track is requested while the current one plays", async ({ page })
       { timeout: 20_000 },
     )
     .toBe(true);
+
+  // Next track from the keyboard (nothing is focused): the title switches and
+  // the new track plays on, without any page error.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => currentTitle(page), { timeout: 10_000 }).not.toBe(title);
+  await expect(page.locator("body")).toContainText(/En lecture\s*:/);
+  const start = await sliderValue(page);
+  await expect.poll(() => sliderValue(page), { timeout: 10_000 }).toBeGreaterThan(start);
+  expect(errors).toEqual([]);
 });

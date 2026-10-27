@@ -104,7 +104,16 @@ export function createMusicManager(): MusicManager {
     }
   };
 
+  // The pending "canplay" waiter of play(), bound to the element it waits on.
+  // Cancelling removes its listener and resolves its promise, so an element whose
+  // source was dropped (or that became `standby`) can never auto-play later.
+  let waiter: { el: HTMLAudioElement; cancel: () => void } | null = null;
+  const cancelWaiter = (el?: HTMLAudioElement) => {
+    if (waiter && (!el || waiter.el === el)) waiter.cancel();
+  };
+
   const emptyElement = (el: HTMLAudioElement) => {
+    cancelWaiter(el);
     el.pause();
     el.removeAttribute("src");
     el.load();
@@ -179,6 +188,8 @@ export function createMusicManager(): MusicManager {
   };
   const onPause = (event: Event) => {
     if (event.currentTarget !== current) return;
+    // Playback time, not wall-clock: onPlay re-arms the timer on resume.
+    clearPreloadTimer();
     // The pause fired right before "ended" is a transition, not a user action.
     if (current.ended) return;
     events.emit({ type: "pause", song: queueManager.getCurrentSong() });
@@ -210,7 +221,9 @@ export function createMusicManager(): MusicManager {
       return analyser || tempAnalyser;
     },
     subscribe: events.subscribe,
-    getTime: () => current.currentTime,
+    // A seek requested before the metadata is the position the user is at: report
+    // it so a save (pagehide) never overwrites the restored position with 0.
+    getTime: () => (pendingSeek !== null ? pendingSeek : current.currentTime),
     getDuration: () => current.duration || 0,
     setTime(time) {
       if (current.readyState === HTMLMediaElement.HAVE_NOTHING) {
@@ -231,7 +244,10 @@ export function createMusicManager(): MusicManager {
     },
     async play() {
       pendingPlay = true;
+      cancelWaiter();
       await initAudioContext();
+      // A pause or a source change may have happened while the context woke up.
+      if (!pendingPlay) return;
       try {
         const el = current;
         if (el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
@@ -239,16 +255,29 @@ export function createMusicManager(): MusicManager {
           return;
         }
         await new Promise<void>((resolve) => {
-          const onCanPlay = async () => {
+          const entry = { el, cancel: () => {} };
+          const finish = () => {
             el.removeEventListener("canplay", onCanPlay);
+            if (waiter === entry) waiter = null;
+            resolve();
+          };
+          const onCanPlay = async () => {
+            // Never let an element that is no longer `current` (or whose play
+            // request was withdrawn) start playing.
+            if (el !== current || !pendingPlay) {
+              finish();
+              return;
+            }
             try {
               await el.play();
             } catch (error) {
               pendingPlay = false;
               console.error("Error during delayed play:", error);
             }
-            resolve();
+            finish();
           };
+          entry.cancel = finish;
+          waiter = entry;
           el.addEventListener("canplay", onCanPlay);
         });
       } catch (error) {
@@ -262,6 +291,7 @@ export function createMusicManager(): MusicManager {
     },
     setPlaying(song) {
       const wasPlaying = !this.isPaused();
+      cancelWaiter();
       pendingSeek = null;
       preloadArmed = false;
       clearPreloadTimer();
@@ -281,6 +311,7 @@ export function createMusicManager(): MusicManager {
     },
     clearSource() {
       this.pause();
+      cancelWaiter();
       pendingSeek = null;
       preloadArmed = false;
       clearPreloadTimer();
@@ -290,6 +321,7 @@ export function createMusicManager(): MusicManager {
     },
     destroy() {
       this.pause();
+      cancelWaiter();
       clearPreloadTimer();
       for (const el of [current, standby]) {
         el.removeEventListener("play", onPlay);
@@ -300,6 +332,10 @@ export function createMusicManager(): MusicManager {
         el.removeEventListener("canplaythrough", onCanPlayThrough);
       }
       events.clear();
+      for (const el of [current, standby]) emptyElement(el);
+      standbyUrl = null;
+      for (const source of sources) source.disconnect();
+      sources.length = 0;
       if (context && context.state !== "closed") void context.close();
       if (tempContext.state !== "closed") void tempContext.close();
     },

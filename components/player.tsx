@@ -103,16 +103,17 @@ export default function MusicPlayer() {
     if (!runtime || !catalog) return;
     const { music } = runtime;
     const songs = flattenCatalog(catalog);
-    music.queueManager.setSongs(songs);
-    if (!restoredRef.current) {
+    // Restore from the first NON-EMPTY catalogue only: an empty one says nothing
+    // about the resumed track. The target index goes into setSongs itself, so the
+    // queue loads the resumed track directly (no first request for track 0, no
+    // "jump" notification). Never autoplay: the activation overlay stays.
+    const restoring = !restoredRef.current && songs.length > 0;
+    const target = restoring ? resumeTarget(songs, readResumeState(), Date.now()) : null;
+    music.queueManager.setSongs(songs, target?.index);
+    if (restoring) {
       restoredRef.current = true;
-      // Restore before binding the saver so the restore itself is not saved
-      // back as position 0. Never autoplay: the activation overlay stays.
-      const target = resumeTarget(songs, readResumeState(), Date.now());
-      if (target) {
-        music.queueManager.setIndex(target.index);
-        if (target.position > 0) music.setTime(target.position);
-      }
+      if (target && target.position > 0) music.setTime(target.position);
+      // Bound after the restore so it is not saved back as position 0.
       unbindResumeRef.current = bindResumeSaver(music);
     }
     setQueued(catalog);

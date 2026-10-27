@@ -144,6 +144,15 @@ describe("bindResumeSaver", () => {
     expect(s.saved()).toMatchObject({ trackId: "a", position: 77 });
   });
 
+  test("pagehide during a pending seek saves the pending position, never 0", () => {
+    // MusicManager.getTime() reports the pending seek until the metadata is
+    // loaded (the element itself still reads 0): the saver just trusts getTime.
+    const s = setup();
+    s.setTime(42);
+    s.pageListeners.get("pagehide")?.();
+    expect(s.saved()).toMatchObject({ trackId: "a", position: 42 });
+  });
+
   test("does not save without a current song", () => {
     const s = setup();
     s.setCurrent(undefined);

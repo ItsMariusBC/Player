@@ -36,8 +36,12 @@ export interface QueueManager {
   getCurrentSong(): QueueItem | undefined;
   /** Selects a song by its index in the queue (wraps around). */
   setIndex(index: number): void;
-  /** Replaces the queue, e.g. when the catalogue is (re)loaded. */
-  setSongs(songs: Song[]): void;
+  /**
+   * Replaces the queue, e.g. when the catalogue is (re)loaded. `startIndex` only
+   * applies when there is no current track yet (first load, e.g. a resume): the
+   * queue then starts there, with a single onUpdate and no track change.
+   */
+  setSongs(songs: Song[], startIndex?: number): void;
 
   previous(): void;
   next(): void;
@@ -49,7 +53,7 @@ export function createQueueManager(options: QueueManagerOptions): QueueManager {
     songs: [],
     // Pour permettre aux composants UI de s'abonner directement
     onUpdate: options.onUpdate,
-    setSongs(songs: Song[]) {
+    setSongs(songs: Song[], startIndex = 0) {
       // Refresh policy: the current track is kept by id (its index may move).
       // If it left the catalogue, the queue clamps to the same index, so the
       // track now at that position takes over (the removed media is no longer
@@ -60,7 +64,7 @@ export function createQueueManager(options: QueueManagerOptions): QueueManager {
 
       let target: number;
       if (songs.length === 0) target = -1;
-      else if (!previous) target = 0;
+      else if (!previous) target = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
       else {
         const found = songs.findIndex((song) => song.id === previous.id);
         target = found !== -1 ? found : Math.min(this.currentIndex, songs.length - 1);

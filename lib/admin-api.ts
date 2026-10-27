@@ -38,7 +38,8 @@ export interface ImportDto {
   id: string;
   filename: string;
   state: ImportState;
-  error: { code: string; trackId?: string } | null;
+  /** Set when state is failed: reason is duplicate, unsupported_format or internal. */
+  error: { reason: string; trackId?: string } | null;
   trackId: string | null;
   createdAt: string;
   updatedAt: string;

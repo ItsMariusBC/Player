@@ -1,6 +1,7 @@
 // lib/import-queue.ts
 // State of the panel's client-side import queue, one entry per dropped file. No React here,
 // so the Bun unit tests import it directly; lib/hooks/use-import-queue.ts drives it.
+import type { ImportDto } from "@/lib/admin-api";
 
 /** Uploads sent at the same time; the others wait in order. */
 export const MAX_PARALLEL_UPLOADS = 2;
@@ -106,6 +107,22 @@ export function importQueueReducer(state: QueueState, action: QueueAction): Queu
         ),
       };
   }
+}
+
+/**
+ * Final status of a polled import, or null while the server still analyses it. Reads the
+ * server's error.reason; a ready import without its track counts as a server error.
+ */
+export function failureFromImport(
+  dto: ImportDto,
+): Extract<EntryStatus, { kind: "ready" | "failed" }> | null {
+  if (dto.state === "processing") return null;
+  if (dto.state === "ready") {
+    return dto.trackId ? { kind: "ready", trackId: dto.trackId } : { kind: "failed", code: "internal" };
+  }
+  const code = toFailureCode(dto.error?.reason);
+  const trackId = dto.error?.trackId;
+  return trackId === undefined ? { kind: "failed", code } : { kind: "failed", code, trackId };
 }
 
 /** The pending entries to start now so that at most MAX_PARALLEL_UPLOADS are uploading. */

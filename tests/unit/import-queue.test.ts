@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { ImportDto } from "../../lib/admin-api";
 import {
   type LabelContext,
   type QueueState,
   entryLabel,
+  failureFromImport,
   importQueueReducer,
   initialQueueState,
   isQueueIdle,
@@ -109,5 +111,63 @@ describe("entryLabel", () => {
     const status = { kind: "failed", code: "too_large" } as const;
     expect(label(status, { ...ctx, maxUploadBytes: 1.6 * MB })).toBe("Trop volumineux (max 2 Mo)");
     expect(label(status, { ...ctx, maxUploadBytes: null })).toBe("Trop volumineux");
+  });
+});
+
+describe("failureFromImport", () => {
+  const dto = (over: Partial<ImportDto>): ImportDto => ({
+    id: "imp",
+    filename: "a.flac",
+    state: "processing",
+    error: null,
+    trackId: null,
+    createdAt: "",
+    updatedAt: "",
+    ...over,
+  });
+
+  test("keeps polling while the server analyses", () => {
+    expect(failureFromImport(dto({}))).toBeNull();
+  });
+
+  test("ready with its track", () => {
+    expect(failureFromImport(dto({ state: "ready", trackId: "t1" }))).toEqual({
+      kind: "ready",
+      trackId: "t1",
+    });
+    expect(failureFromImport(dto({ state: "ready" }))).toEqual({
+      kind: "failed",
+      code: "internal",
+    });
+  });
+
+  test("reads the server's failure reason", () => {
+    const duplicate = failureFromImport(
+      dto({ state: "failed", error: { reason: "duplicate", trackId: "t1" } }),
+    );
+    expect(duplicate).toEqual({ kind: "failed", code: "duplicate", trackId: "t1" });
+    expect(
+      failureFromImport(dto({ state: "failed", error: { reason: "unsupported_format" } })),
+    ).toEqual({ kind: "failed", code: "unsupported_format" });
+    expect(failureFromImport(dto({ state: "failed", error: { reason: "internal" } }))).toEqual({
+      kind: "failed",
+      code: "internal",
+    });
+    expect(failureFromImport(dto({ state: "failed", error: null }))).toEqual({
+      kind: "failed",
+      code: "internal",
+    });
+  });
+
+  test("feeds the duplicate title into the label", () => {
+    const status = failureFromImport(
+      dto({ state: "failed", error: { reason: "duplicate", trackId: "t1" } }),
+    );
+    if (!status) throw new Error("expected a final status");
+    const label = entryLabel(
+      { key: "a", filename: "a.flac", size: 1, status },
+      { maxUploadBytes: null, titleOf: (id) => (id === "t1" ? "Hey" : undefined) },
+    );
+    expect(label).toBe("Doublon de Hey");
   });
 });

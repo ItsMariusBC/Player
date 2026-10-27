@@ -7,6 +7,7 @@ import { getImport, uploadFile } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import {
   type QueueEntry,
+  failureFromImport,
   importQueueReducer,
   initialQueueState,
   isQueueIdle,
@@ -72,18 +73,14 @@ export function useImportQueue(opts: {
         const dto = await getImport(importId);
         if (signal.aborted) return;
         misses = 0;
-        if (dto.state === "ready" && dto.trackId) {
-          dispatch({ type: "ready", key, trackId: dto.trackId });
+        const status = failureFromImport(dto);
+        if (status?.kind === "ready") {
+          dispatch({ type: "ready", key, trackId: status.trackId });
           onReadyRef.current();
           return;
         }
-        if (dto.state !== "processing") {
-          dispatch({
-            type: "failed",
-            key,
-            code: toFailureCode(dto.error?.code),
-            trackId: dto.error?.trackId,
-          });
+        if (status) {
+          dispatch({ type: "failed", key, code: status.code, trackId: status.trackId });
           return;
         }
       } catch (error) {

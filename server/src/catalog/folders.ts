@@ -158,8 +158,15 @@ export function deleteFolder(db: DatabaseSync, id: string, opts: { force: boolea
     .all(id) as unknown as { id: string; name: string }[];
   if (!opts.force) {
     if (trackIds.length > 0 || children.length > 0) throw new FolderNotEmptyError();
-    db.prepare("DELETE FROM folders WHERE id = ?").run(id);
-    renumberFolders(db, folder.parentId);
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+      renumberFolders(db, folder.parentId);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
     return;
   }
   for (const child of children) assertNameFree(db, folder.parentId, child.name, id);

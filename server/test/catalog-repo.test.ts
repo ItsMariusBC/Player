@@ -16,6 +16,7 @@ import {
   insertTrack,
   listTracks,
   moveTrack,
+  renumber,
   updateTrack,
 } from "../src/catalog/tracks.ts";
 import {
@@ -286,5 +287,60 @@ describe("tracks", () => {
     assert.deepEqual(positions(f.id), ["b:0"]);
     const count = db.prepare("SELECT COUNT(*) AS n FROM favorites").get() as { n: number };
     assert.equal(count.n, 0);
+  });
+});
+
+describe("transactions", () => {
+  it("rolls back a plain folder delete when renumbering fails", () => {
+    const a = createFolder(db, { parentId: null, name: "A" }, now);
+    createFolder(db, { parentId: null, name: "B" }, now);
+    createFolder(db, { parentId: null, name: "C" }, now);
+    db.exec("CREATE TRIGGER boom BEFORE UPDATE ON folders BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    assert.throws(() => deleteFolder(db, a.id, { force: false }), /boom/);
+    db.exec("DROP TRIGGER boom");
+    assert.deepEqual(
+      listFolders(db).map((f) => [f.name, f.position]),
+      [
+        ["A", 0],
+        ["B", 1],
+        ["C", 2],
+      ],
+    );
+  });
+
+  it("rolls back a track move when a write fails midway", () => {
+    const f1 = createFolder(db, { parentId: null, name: "F1" }, now);
+    const f2 = createFolder(db, { parentId: null, name: "F2" }, now);
+    const a = addTrack(f1.id, "a");
+    addTrack(f1.id, "b");
+    addTrack(f2.id, "x");
+    db.exec(
+      "CREATE TRIGGER boom BEFORE UPDATE OF position ON tracks WHEN NEW.title = 'b' BEGIN SELECT RAISE(ABORT, 'boom'); END",
+    );
+    assert.throws(() => moveTrack(db, a.id, f2.id, 0, now), /boom/);
+    db.exec("DROP TRIGGER boom");
+    assert.deepEqual(positions(f1.id), ["a:0", "b:1"]);
+    assert.deepEqual(positions(f2.id), ["x:0"]);
+    assert.equal(getTrack(db, a.id)?.folderId, f1.id);
+  });
+
+  it("lifts children into the root on a forced delete and keeps 0..n-1", () => {
+    const p = createFolder(db, { parentId: null, name: "P" }, now);
+    createFolder(db, { parentId: p.id, name: "K1" }, now);
+    createFolder(db, { parentId: p.id, name: "K2" }, now);
+    createFolder(db, { parentId: null, name: "Z" }, now);
+    addTrack(null, "r0");
+    addTrack(p.id, "p0");
+    deleteFolder(db, p.id, { force: true });
+    renumber(db, null);
+    assert.deepEqual(positions(null), ["r0:0", "p0:1"]);
+    assert.deepEqual(
+      listFolders(db).map((f) => [f.name, f.parentId, f.position]),
+      [
+        ["Z", null, 0],
+        ["K1", null, 1],
+        ["K2", null, 2],
+      ],
+    );
   });
 });

@@ -6,6 +6,7 @@ import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { createImportQueue, recoverStaleImports } from "./admin/imports.ts";
+import { createMaintenance, scheduleMaintenance } from "./admin/maintenance.ts";
 import { createMediaStorage } from "./media/storage.ts";
 import { createProviders } from "./metadata/providers.ts";
 import { createMetadataSearch } from "./metadata/search.ts";
@@ -61,6 +62,16 @@ const oidc = await discoverOidc();
 
 const storage = createMediaStorage(config.dataDir);
 await recoverStaleImports({ db, storage, log });
+const maintenance = createMaintenance({ db, storage, log });
+await maintenance
+  .run()
+  .catch((error) =>
+    log("maintenance.failed", { error: error instanceof Error ? error.name : "unknown" }),
+  );
+scheduleMaintenance(maintenance, {
+  intervalMs: config.maintenanceIntervalHours * 3_600_000,
+  log,
+});
 
 // Same relative path from server/src and dist/server.
 function appVersion(): string {
@@ -91,6 +102,7 @@ const app = createApp({
     download: { maxBytes: config.maxUploadBytes, userAgent },
   }),
   metadata,
+  maintenance,
   staticDir: "dist",
   log,
 });

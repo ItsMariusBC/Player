@@ -19,6 +19,8 @@ export interface AppConfig {
   };
   trustProxy: boolean;
   maxUploadBytes: number;
+  /** Hours between maintenance passes; 0 disables the schedule. */
+  maintenanceIntervalHours: number;
   /** Dev-only login bypass, always false in production. */
   devBypass: boolean;
 }
@@ -67,6 +69,16 @@ function parseMaxUploadBytes(env: Env): number {
     throw new ConfigError(`MAX_UPLOAD_MB must be a positive integer, got "${raw}"`);
   }
   return value * BYTES_PER_MB;
+}
+
+function parseMaintenanceIntervalHours(env: Env): number {
+  const raw = env.MAINTENANCE_INTERVAL_HOURS?.trim();
+  if (!raw) return 24;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new ConfigError(`MAINTENANCE_INTERVAL_HOURS must be an integer >= 0, got "${raw}"`);
+  }
+  return value;
 }
 
 function parsePort(env: Env): number {
@@ -150,6 +162,7 @@ export function loadConfig(env: Env): AppConfig {
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
     maxUploadBytes: parseMaxUploadBytes(env),
+    maintenanceIntervalHours: parseMaintenanceIntervalHours(env),
     devBypass: parseDevBypass(env, nodeEnv, appUrl),
   };
 }

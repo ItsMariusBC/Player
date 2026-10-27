@@ -10,6 +10,8 @@ export interface MediaStorage {
   removeIncoming(importId: string): Promise<void>;
   /** Names of the directories under incoming/ (empty when none exists yet). */
   listIncoming(): Promise<string[]>;
+  /** Names of the directories under media/ (empty when none exists yet). */
+  listMedia(): Promise<string[]>;
   publish(
     importId: string,
     trackId: string,
@@ -69,6 +71,15 @@ export function createMediaStorage(dataDir: string): MediaStorage {
     async listIncoming() {
       try {
         const entries = await readdir(incomingRoot, { withFileTypes: true });
+        return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
+    },
+    async listMedia() {
+      try {
+        const entries = await readdir(mediaRoot, { withFileTypes: true });
         return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];

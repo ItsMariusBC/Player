@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createImportQueue } from "../src/admin/imports.ts";
+import { createMaintenance } from "../src/admin/maintenance.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
@@ -101,6 +102,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
       resolve: opts.download?.resolve ?? (async () => ["93.184.216.34"]),
     },
   });
+  const maintenance = createMaintenance({ db, storage, now: clock, log: logger });
   const metadata = createMetadataSearch({
     providers: opts.metadata?.providers ?? [],
     now: clock,
@@ -120,6 +122,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    maintenance,
     now: clock,
     staticDir: opts.staticDir,
     mount: opts.mount,
@@ -164,6 +167,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    maintenance,
     tempDir,
     cleanup,
     accounts,

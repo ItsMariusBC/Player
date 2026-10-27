@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { inTransaction } from "../catalog/tx.ts";
 import { ingestFile } from "../media/ingest.ts";
 import type { MediaStorage } from "../media/storage.ts";
 
@@ -101,4 +102,37 @@ export function createImportQueue(deps: {
       return chain;
     },
   };
+}
+
+/**
+ * Startup recovery: imports left `processing` by a crash or deploy can never finish, so they
+ * are failed, and their partial uploads (and any incoming directory without a row) are removed.
+ * Returns how many imports were failed.
+ */
+export async function recoverStaleImports(deps: {
+  db: DatabaseSync;
+  storage: MediaStorage;
+  log?: (event: string, data?: Record<string, unknown>) => void;
+  now?: () => Date;
+}): Promise<number> {
+  const { db, storage, log } = deps;
+  const stamp = (deps.now ?? (() => new Date()))().toISOString();
+  const stale = (
+    db.prepare("SELECT id FROM imports WHERE state = 'processing'").all() as { id: string }[]
+  ).map((row) => row.id);
+  if (stale.length > 0) {
+    inTransaction(db, () => {
+      db.prepare(
+        "UPDATE imports SET state = 'failed', error = ?, updated_at = ? WHERE state = 'processing'",
+      ).run(JSON.stringify({ reason: "internal" }), stamp);
+    });
+  }
+  const known = new Set(
+    (db.prepare("SELECT id FROM imports").all() as { id: string }[]).map((row) => row.id),
+  );
+  const doomed = new Set(stale);
+  for (const name of await storage.listIncoming()) if (!known.has(name)) doomed.add(name);
+  for (const id of doomed) await storage.removeIncoming(id);
+  log?.("imports.recovered", { count: stale.length });
+  return stale.length;
 }

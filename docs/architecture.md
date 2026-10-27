@@ -1,6 +1,6 @@
 # Architecture du lecteur
 
-Le code est organisé en couches. Une couche ne dépend que de celles situées en dessous.
+Le code est organisé en couches. Une couche ne dépend que de celles situées au-dessus dans le tableau.
 
 | Couche       | Fichiers                                                                               | Rôle                                                                                                                                                                                                                                                                                                                                                              |
 | ------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -21,7 +21,7 @@ Le code est organisé en couches. Une couche ne dépend que de celles situées e
 
 ## Serveur et administration
 
-Le serveur (`server/src/`, Node 24, Hono, SQLite) a ses propres couches. Une couche ne dépend que de celles situées en dessous.
+Le serveur (`server/src/`, Node 24, Hono, SQLite) a ses propres couches. Une couche ne dépend que de celles situées au-dessus dans le tableau.
 
 | Couche         | Fichiers                                                                                                                                             | Rôle                                                                                                                                                                                                                                                                                                                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

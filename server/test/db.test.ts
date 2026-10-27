@@ -18,6 +18,13 @@ describe("database", () => {
     db.close();
   });
 
+  it("waits up to 5 s on a locked database", () => {
+    const db = openDatabase(":memory:");
+    const row = db.prepare("PRAGMA busy_timeout").get() as { timeout: number };
+    assert.equal(row.timeout, 5000);
+    db.close();
+  });
+
   it("enforces foreign keys on sessions", () => {
     const db = openDatabase(":memory:");
     migrate(db);

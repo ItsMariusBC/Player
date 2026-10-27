@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AudioFormat, ProbeResult } from "./probe.ts";
 
@@ -8,6 +8,8 @@ export type CoverExt = "jpg" | "png" | "webp";
 export interface MediaStorage {
   incomingDir(importId: string): string;
   removeIncoming(importId: string): Promise<void>;
+  /** Names of the directories under incoming/ (empty when none exists yet). */
+  listIncoming(): Promise<string[]>;
   publish(
     importId: string,
     trackId: string,
@@ -63,6 +65,15 @@ export function createMediaStorage(dataDir: string): MediaStorage {
     },
     async removeIncoming(importId) {
       await rm(path.join(incomingRoot, safeId(importId)), { recursive: true, force: true });
+    },
+    async listIncoming() {
+      try {
+        const entries = await readdir(incomingRoot, { withFileTypes: true });
+        return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
     },
     originalPath(trackId, ext) {
       return path.join(trackDir(trackId), `original.${safeExt(ext, AUDIO_EXTS)}`);

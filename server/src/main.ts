@@ -5,7 +5,7 @@ import { createApp } from "./app.ts";
 import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
-import { createImportQueue } from "./admin/imports.ts";
+import { createImportQueue, recoverStaleImports } from "./admin/imports.ts";
 import { createMediaStorage } from "./media/storage.ts";
 import { createProviders } from "./metadata/providers.ts";
 import { createMetadataSearch } from "./metadata/search.ts";
@@ -60,6 +60,7 @@ async function discoverOidc() {
 const oidc = await discoverOidc();
 
 const storage = createMediaStorage(config.dataDir);
+await recoverStaleImports({ db, storage, log });
 
 // Same relative path from server/src and dist/server.
 function appVersion(): string {

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { recoverStaleImports } from "../src/admin/imports.ts";
 import { createTestApp } from "./helpers.ts";
 import { writeMp3, writeWav } from "./fixtures.ts";
 
@@ -216,5 +217,41 @@ describe("ingestFile race", () => {
     });
     assert.deepEqual(result, { kind: "duplicate", trackId: "rival" });
     assert.ok(!existsSync(path.join(t.tempDir, "incoming", "race")));
+  });
+
+  describe("recoverStaleImports", () => {
+    it("fails processing imports, removes their uploads and orphan directories", async () => {
+      t = createTestApp();
+      t.loginAs("admin");
+      const user = (t.db.prepare("SELECT id FROM users LIMIT 1").get() as { id: string }).id;
+      const insert = t.db.prepare(
+        "INSERT INTO imports (id, user_id, filename, state, error, created_at, updated_at) VALUES (?, ?, 'a.wav', ?, ?, 'x', 'x')",
+      );
+      insert.run("stale", user, "processing", null);
+      insert.run("done", user, "ready", null);
+      insert.run("bad", user, "failed", '{"reason":"duplicate"}');
+      for (const id of ["stale", "done", "orphan"]) {
+        writeFileSync(path.join(t.storage.incomingDir(id), "upload.bin"), "x");
+      }
+      const logged: unknown[] = [];
+      const count = await recoverStaleImports({
+        db: t.db,
+        storage: t.storage,
+        log: (event, data) => logged.push({ event, data }),
+        now: () => new Date("2026-10-27T00:00:00Z"),
+      });
+      assert.equal(count, 1);
+      assert.deepEqual(logged, [{ event: "imports.recovered", data: { count: 1 } }]);
+      const rows = t.db.prepare("SELECT * FROM imports ORDER BY id").all() as any[];
+      const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+      assert.equal(byId.stale.state, "failed");
+      assert.equal(JSON.parse(byId.stale.error).reason, "internal");
+      assert.equal(byId.stale.updated_at, "2026-10-27T00:00:00.000Z");
+      assert.equal(byId.done.state, "ready");
+      assert.equal(byId.done.updated_at, "x");
+      assert.equal(byId.bad.error, '{"reason":"duplicate"}');
+      const left = readdirSync(path.join(t.tempDir, "incoming"));
+      assert.deepEqual(left, ["done"]);
+    });
   });
 });

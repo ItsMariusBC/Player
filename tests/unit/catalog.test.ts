@@ -68,9 +68,10 @@ describe("flattenCatalog", () => {
       author: "Artist",
       album: "Album",
       url: "/api/media/x1",
-      picture: "/api/media/x1/cover",
+      picture: "/api/media/x1/cover?v=2026-10-27T00%3A00%3A00.000Z",
       folderId: "A1",
       folderPath: ["Folder A", "Folder A1"],
+      updatedAt: "2026-10-27T00:00:00.000Z",
     });
     const withoutCover = flattenCatalog(catalog).find((s) => s.id === "a1");
     expect(withoutCover && "picture" in withoutCover).toBe(false);
@@ -98,5 +99,11 @@ describe("media URLs", () => {
   test("are same-origin API paths", () => {
     expect(mediaUrl("abc")).toBe("/api/media/abc");
     expect(coverUrl("abc")).toBe("/api/media/abc/cover");
+  });
+
+  test("the cover URL carries updatedAt as a cache buster", () => {
+    expect(coverUrl("a b", "2026-10-27T10:00:00.000Z")).toBe(
+      "/api/media/a%20b/cover?v=2026-10-27T10%3A00%3A00.000Z",
+    );
   });
 });

@@ -1,8 +1,8 @@
 // components/player.tsx
 import { CornerActions } from "@/components/corner-actions";
-import { AdminPanel } from "@/components/admin-panel";
+import { AdminPanel } from "@/components/admin/admin-panel";
 import { useSessionInfo } from "@/components/auth-gate";
-import { useCallback, useEffect, useState, MouseEventHandler } from "react";
+import { useCallback, useEffect, useRef, useState, MouseEventHandler } from "react";
 import { Gradient } from "@/components/gradient";
 import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
 import { useSongGradient } from "@/lib/hooks/use-song-gradient";
@@ -41,6 +41,19 @@ export default function MusicPlayer() {
   // the player renders only once the first one is in, so no empty-queue flash.
   const { status: catalogStatus, catalog, error: catalogError, refresh: refreshCatalog } = useCatalog();
   const [queued, setQueued] = useState<Catalog>();
+
+  // The « Administration » button is unmounted while the panel is open: once it is back,
+  // give it the focus (looked up by attribute, never through a ref to the old node).
+  const adminWasOpen = useRef(false);
+  useEffect(() => {
+    if (adminOpen) {
+      adminWasOpen.current = true;
+      return;
+    }
+    if (!adminWasOpen.current) return;
+    adminWasOpen.current = false;
+    document.querySelector<HTMLElement>("[data-admin-button]")?.focus();
+  }, [adminOpen]);
 
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
@@ -161,7 +174,7 @@ export default function MusicPlayer() {
           onMouseDown={onClick}
         >
           {adminOpen ? (
-            <AdminPanel onClose={closeAdmin} />
+            <AdminPanel onClose={closeAdmin} onCatalogChanged={refreshCatalog} />
           ) : visualizerExpanded ? (
             <VisualizerStage analyser={runtime.music.analyser} onClose={closeVisualizer} />
           ) : (

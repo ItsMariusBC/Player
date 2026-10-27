@@ -43,10 +43,15 @@ export interface Song {
   folderId: string | null;
   /** Folder names from the root down to the track's folder. */
   folderPath: string[];
+  /** The track's updatedAt, carried so a replaced cover gets a new URL. */
+  updatedAt: string;
 }
 
 export const mediaUrl = (id: string) => `/api/media/${encodeURIComponent(id)}`;
-export const coverUrl = (id: string) => `/api/media/${encodeURIComponent(id)}/cover`;
+/** With updatedAt, the URL changes after each edit, so a replaced cover is fetched again. */
+export const coverUrl = (id: string, updatedAt?: string) =>
+  `/api/media/${encodeURIComponent(id)}/cover` +
+  (updatedAt ? `?v=${encodeURIComponent(updatedAt)}` : "");
 
 export function fetchCatalog(): Promise<Catalog> {
   return api<Catalog>("/api/catalog");
@@ -61,8 +66,9 @@ function toSong(track: TrackDto, folderId: string | null, folderPath: string[]):
     url: mediaUrl(track.id),
     folderId,
     folderPath,
+    updatedAt: track.updatedAt,
   };
-  if (track.hasCover) song.picture = coverUrl(track.id);
+  if (track.hasCover) song.picture = coverUrl(track.id, track.updatedAt);
   return song;
 }
 

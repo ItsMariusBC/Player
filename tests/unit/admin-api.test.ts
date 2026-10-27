@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ApiError } from "../../lib/api";
 import {
+  batchDeleteTracks,
+  batchUpdateTracks,
+  importUrl,
   applyMetadata,
   createFolder,
   deleteFolder,
@@ -172,6 +175,35 @@ class FakeXhr {
   }
 }
 
+describe("batch and URL calls", () => {
+  test("batchUpdateTracks posts ids and patch", async () => {
+    const calls = stubFetch(200, { updated: [], missing: [] });
+    await batchUpdateTracks(["a", "b"], { artist: "X" });
+    expect(calls[0]?.url).toBe("/api/admin/tracks/batch");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      ids: ["a", "b"],
+      patch: { artist: "X" },
+    });
+  });
+
+  test("batchDeleteTracks posts the ids", async () => {
+    const calls = stubFetch(200, { deleted: ["a"], missing: [] });
+    expect(await batchDeleteTracks(["a"])).toEqual({ deleted: ["a"], missing: [] });
+    expect(calls[0]?.url).toBe("/api/admin/tracks/batch-delete");
+  });
+
+  test("importUrl posts the url and the folder", async () => {
+    const calls = stubFetch(202, { importId: "i" });
+    expect(await importUrl("https://x.test/a.mp3", "f1")).toEqual({ importId: "i" });
+    expect(calls[0]?.url).toBe("/api/admin/imports/url");
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      url: "https://x.test/a.mp3",
+      folderId: "f1",
+    });
+  });
+});
+
 describe("uploadFile", () => {
   const file = () => new File([new Uint8Array([1])], "song.flac");
 
@@ -188,6 +220,16 @@ describe("uploadFile", () => {
     xhr.respond(202, { importId: "imp" });
     expect(await pending).toEqual({ importId: "imp" });
     expect(progress).toEqual([0.5, 1]);
+  });
+
+  test("appends folderId before the file", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const pending = uploadFile(file(), () => {}, { folderId: "f1" });
+    const body = FakeXhr.last.body as FormData;
+    expect([...body.keys()]).toEqual(["folderId", "file"]);
+    expect(body.get("folderId")).toBe("f1");
+    FakeXhr.last.respond(202, { importId: "imp" });
+    await pending;
   });
 
   test("rejects with an ApiError from the error envelope", async () => {

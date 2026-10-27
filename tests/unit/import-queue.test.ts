@@ -12,7 +12,12 @@ import {
 } from "../../lib/import-queue";
 
 const MB = 1024 * 1024;
-const file = (key: string, size = 10) => ({ key, filename: `${key}.flac`, size });
+const file = (key: string, size = 10) => ({
+  key,
+  kind: "file" as const,
+  filename: `${key}.flac`,
+  size,
+});
 const add = (state: QueueState, keys: string[], maxUploadBytes: number | null = null) =>
   importQueueReducer(state, { type: "add", files: keys.map((key) => file(key)), maxUploadBytes });
 
@@ -84,6 +89,52 @@ describe("importQueueReducer", () => {
     state = importQueueReducer(state, { type: "failed", key: "a", code: "internal" });
     state = importQueueReducer(state, { type: "clear" });
     expect(state.entries.map((e) => e.key)).toEqual(["b"]);
+  });
+});
+
+describe("URL entries", () => {
+  const urlFile = { key: "u", kind: "url" as const, filename: "song.wav", size: 0 };
+  const addUrl = () =>
+    importQueueReducer(initialQueueState, { type: "add", files: [urlFile], maxUploadBytes: 10 });
+
+  test("default to file entries and skip the client size check", () => {
+    const state = addUrl();
+    expect(state.entries[0]?.kind).toBe("url");
+    expect(state.entries[0]?.status).toEqual({ kind: "pending" });
+    expect(add(initialQueueState, ["a"]).entries[0]?.kind).toBe("file");
+  });
+
+  test("ignore progress and go to processing once the server answered", () => {
+    let state = importQueueReducer(addUrl(), { type: "start", key: "u" });
+    state = importQueueReducer(state, { type: "progress", key: "u", ratio: 0.5 });
+    expect(state.entries[0]?.status).toEqual({ kind: "uploading", progress: 0 });
+    state = importQueueReducer(state, { type: "uploaded", key: "u", importId: "i" });
+    expect(state.entries[0]?.status).toEqual({ kind: "processing", importId: "i" });
+  });
+
+  test("keep the download_failed detail for the label", () => {
+    const dto = {
+      id: "i",
+      filename: "x",
+      state: "failed",
+      error: { reason: "download_failed", detail: "http_404" },
+      trackId: null,
+      createdAt: "",
+      updatedAt: "",
+    } satisfies ImportDto;
+    const status = failureFromImport(dto);
+    expect(status).toEqual({ kind: "failed", code: "download_failed", detail: "http_404" });
+    if (status === null) throw new Error("expected a status");
+    const label = entryLabel(
+      { ...urlFile, status },
+      { maxUploadBytes: null, titleOf: () => undefined },
+    );
+    expect(label).toBe("Téléchargement impossible (http_404)");
+  });
+
+  test("label a running download", () => {
+    const ctx = { maxUploadBytes: null, titleOf: () => undefined };
+    expect(entryLabel({ ...urlFile, status: { kind: "pending" } }, ctx)).toBe("Téléchargement…");
   });
 });
 
@@ -165,7 +216,7 @@ describe("failureFromImport", () => {
     );
     if (!status) throw new Error("expected a final status");
     const label = entryLabel(
-      { key: "a", filename: "a.flac", size: 1, status },
+      { key: "a", kind: "file", filename: "a.flac", size: 1, status },
       { maxUploadBytes: null, titleOf: (id) => (id === "t1" ? "Hey" : undefined) },
     );
     expect(label).toBe("Doublon de Hey");

@@ -6,17 +6,21 @@ import type { ImportDto } from "@/lib/admin-api";
 /** Uploads sent at the same time; the others wait in order. */
 export const MAX_PARALLEL_UPLOADS = 2;
 
-export type FailureCode = "duplicate" | "unsupported_format" | "too_large" | "internal";
+export type FailureCode = "duplicate" | "unsupported_format" | "too_large"
+  | "download_failed"
+  | "internal";
 
 export type EntryStatus =
   | { kind: "pending" }
   | { kind: "uploading"; progress: number }
   | { kind: "processing"; importId: string }
   | { kind: "ready"; trackId: string }
-  | { kind: "failed"; code: FailureCode; trackId?: string };
+  | { kind: "failed"; code: FailureCode; trackId?: string; detail?: string };
 
 export interface QueueEntry {
   key: string;
+  /** A URL entry has no upload progress: it is sent as a request and goes straight to analysis. */
+  kind: "file" | "url";
   filename: string;
   size: number;
   status: EntryStatus;
@@ -29,7 +33,7 @@ export interface QueueState {
 export type QueueAction =
   | {
       type: "add";
-      files: { key: string; filename: string; size: number }[];
+      files: { key: string; kind?: "file" | "url"; filename: string; size: number }[];
       /** null when the limit is unknown: no check before sending. */
       maxUploadBytes: number | null;
     }
@@ -37,12 +41,17 @@ export type QueueAction =
   | { type: "progress"; key: string; ratio: number }
   | { type: "uploaded"; key: string; importId: string }
   | { type: "ready"; key: string; trackId: string }
-  | { type: "failed"; key: string; code: FailureCode; trackId?: string }
+  | { type: "failed"; key: string; code: FailureCode; trackId?: string; detail?: string }
   | { type: "clear" };
 
 export const initialQueueState: QueueState = { entries: [] };
 
-const KNOWN_CODES = new Set<string>(["duplicate", "unsupported_format", "too_large"]);
+const KNOWN_CODES = new Set<string>([
+  "duplicate",
+  "unsupported_format",
+  "too_large",
+  "download_failed",
+]);
 
 /** Server or client error code to the queue's failure code; anything else is « internal ». */
 export function toFailureCode(code: string | undefined): FailureCode {
@@ -71,8 +80,9 @@ export function importQueueReducer(state: QueueState, action: QueueAction): Queu
       const limit = action.maxUploadBytes;
       const added = action.files.map<QueueEntry>((file) => ({
         ...file,
+        kind: file.kind ?? "file",
         status:
-          limit !== null && file.size > limit
+          file.kind !== "url" && limit !== null && file.size > limit
             ? { kind: "failed", code: "too_large" }
             : { kind: "pending" },
       }));
@@ -84,7 +94,7 @@ export function importQueueReducer(state: QueueState, action: QueueAction): Queu
       );
     case "progress":
       return update(state, action.key, (entry) =>
-        entry.status.kind === "uploading"
+        entry.kind === "file" && entry.status.kind === "uploading"
           ? { kind: "uploading", progress: Math.min(Math.max(action.ratio, 0), 1) }
           : null,
       );
@@ -95,11 +105,12 @@ export function importQueueReducer(state: QueueState, action: QueueAction): Queu
     case "ready":
       return update(state, action.key, () => ({ kind: "ready", trackId: action.trackId }));
     case "failed":
-      return update(state, action.key, () =>
-        action.trackId === undefined
-          ? { kind: "failed", code: action.code }
-          : { kind: "failed", code: action.code, trackId: action.trackId },
-      );
+      return update(state, action.key, () => ({
+        kind: "failed",
+        code: action.code,
+        ...(action.trackId === undefined ? {} : { trackId: action.trackId }),
+        ...(action.detail === undefined ? {} : { detail: action.detail }),
+      }));
     case "clear":
       return {
         entries: state.entries.filter(
@@ -122,7 +133,13 @@ export function failureFromImport(
   }
   const code = toFailureCode(dto.error?.reason);
   const trackId = dto.error?.trackId;
-  return trackId === undefined ? { kind: "failed", code } : { kind: "failed", code, trackId };
+  const detail = code === "download_failed" ? dto.error?.detail : undefined;
+  return {
+    kind: "failed",
+    code,
+    ...(trackId === undefined ? {} : { trackId }),
+    ...(detail === undefined ? {} : { detail }),
+  };
 }
 
 /** The pending entries to start now so that at most MAX_PARALLEL_UPLOADS are uploading. */
@@ -149,8 +166,9 @@ export function entryLabel(entry: QueueEntry, ctx: LabelContext): string {
   const { status } = entry;
   switch (status.kind) {
     case "pending":
-      return "Envoi 0 %";
+      return entry.kind === "url" ? "Téléchargement…" : "Envoi 0 %";
     case "uploading":
+      if (entry.kind === "url") return "Téléchargement…";
       return `Envoi ${Math.round(status.progress * 100)} %`;
     case "processing":
       return "Analyse…";
@@ -168,6 +186,10 @@ export function entryLabel(entry: QueueEntry, ctx: LabelContext): string {
           return ctx.maxUploadBytes === null
             ? "Trop volumineux"
             : `Trop volumineux (max ${Math.round(ctx.maxUploadBytes / 1024 / 1024)} Mo)`;
+        case "download_failed":
+          return status.detail
+            ? `Téléchargement impossible (${status.detail})`
+            : "Téléchargement impossible";
         case "internal":
           return "Erreur serveur";
       }

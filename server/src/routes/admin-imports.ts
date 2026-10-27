@@ -1,10 +1,5 @@
-import busboy from "busboy";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
-import { createWriteStream } from "node:fs";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
-import type { ReadableStream as NodeWebStream } from "node:stream/web";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { ImportQueue } from "../admin/imports.ts";
@@ -12,6 +7,7 @@ import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import type { AppConfig } from "../config.ts";
 import { jsonError } from "../http.ts";
 import type { MediaStorage } from "../media/storage.ts";
+import { receive } from "./multipart.ts";
 
 interface ImportRow {
   id: string;
@@ -32,65 +28,6 @@ const toDto = (row: ImportRow) => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
-
-function baseName(raw: string): string {
-  const name = [...path.basename(raw.replaceAll("\\", "/"))]
-    .filter((ch) => ch.charCodeAt(0) > 0x1f && ch.charCodeAt(0) !== 0x7f)
-    .join("");
-  return (name === "" || name === "." || name === ".." ? "upload" : name).slice(0, 255);
-}
-
-type Received = "stored" | "too_large" | "no_file" | "bad_request";
-
-async function receive(
-  request: Request,
-  target: string,
-  maxBytes: number,
-): Promise<{ outcome: Received; filename: string }> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!request.body || !/^multipart\/form-data/i.test(contentType)) {
-    return { outcome: "bad_request", filename: "" };
-  }
-  let parser: busboy.Busboy;
-  try {
-    parser = busboy({
-      headers: Object.fromEntries(request.headers),
-      limits: { files: 1, fileSize: maxBytes },
-    });
-  } catch {
-    return { outcome: "bad_request", filename: "" };
-  }
-  const state = { outcome: "no_file" as Received };
-  let filename = "";
-  const writes: Promise<void>[] = [];
-  const source = Readable.fromWeb(request.body as NodeWebStream<Uint8Array>);
-  const done = new Promise<void>((resolve, reject) => {
-    parser.on("file", (name, stream, info) => {
-      if (name !== "file" || state.outcome !== "no_file") {
-        stream.resume();
-        return;
-      }
-      state.outcome = "stored";
-      filename = baseName(info.filename);
-      stream.on("limit", () => {
-        state.outcome = "too_large";
-        // Stop reading the rest of the upload.
-        source.destroy();
-      });
-      writes.push(pipeline(stream, createWriteStream(target)));
-    });
-    parser.on("error", reject);
-    parser.on("close", resolve);
-  });
-  try {
-    await Promise.all([pipeline(source, parser), done]);
-    await Promise.all(writes);
-  } catch {
-    await Promise.allSettled(writes);
-    return { outcome: state.outcome === "too_large" ? state.outcome : "bad_request", filename };
-  }
-  return { outcome: state.outcome, filename };
-}
 
 export function adminImportRoutes(
   deps: {

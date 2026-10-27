@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import { NotFoundError, type TrackRecord } from "./types.ts";
+import { inTransaction } from "./tx.ts";
+import { NotFoundError, type TrackDto, type TrackRecord } from "./types.ts";
 
 interface TrackRow {
   id: string;
@@ -165,8 +166,7 @@ export function moveTrack(
     const folder = db.prepare("SELECT id FROM folders WHERE id = ?").get(folderId);
     if (!folder) throw new NotFoundError("Folder not found");
   }
-  db.exec("BEGIN");
-  try {
+  inTransaction(db, () => {
     const target = bucketIds(db, folderId).filter((trackId) => trackId !== id);
     const index =
       position === undefined ? target.length : Math.max(0, Math.min(position, target.length));
@@ -178,24 +178,31 @@ export function moveTrack(
     );
     writePositions(db, target);
     if (track.folderId !== folderId) renumber(db, track.folderId);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
   return requireTrack(db, id);
 }
 
 /** Deletes a track (favorites cascade) and renumbers its folder. */
 export function deleteTrack(db: DatabaseSync, id: string): void {
   const track = requireTrack(db, id);
-  db.exec("BEGIN");
-  try {
+  inTransaction(db, () => {
     db.prepare("DELETE FROM tracks WHERE id = ?").run(id);
     renumber(db, track.folderId);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
+}
+
+/** Wire shape of a track (GET /api/catalog and the admin routes). */
+export function toTrackDto(t: TrackRecord): TrackDto {
+  return {
+    id: t.id,
+    folderId: t.folderId,
+    title: t.title,
+    artist: t.artist,
+    album: t.album,
+    durationMs: t.durationMs,
+    format: t.format,
+    hasCover: t.coverExt !== null,
+    position: t.position,
+    updatedAt: t.updatedAt.toISOString(),
+  };
 }

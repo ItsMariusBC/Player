@@ -3,7 +3,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AudioFormat, ProbeResult } from "./probe.ts";
 
-type CoverExt = "jpg" | "png" | "webp";
+export type CoverExt = "jpg" | "png" | "webp";
 
 export interface MediaStorage {
   incomingDir(importId: string): string;
@@ -17,7 +17,12 @@ export interface MediaStorage {
   ): Promise<void>;
   originalPath(trackId: string, ext: AudioFormat): string;
   coverPath(trackId: string, ext: CoverExt): string;
+  /** Writes the cover and removes a previous cover stored with another extension. */
   writeCover(trackId: string, data: Buffer, ext: CoverExt): Promise<void>;
+  /** Moves a file of the track directory into place as the cover, removing other covers. */
+  replaceCover(trackId: string, file: string, ext: CoverExt): Promise<void>;
+  /** A fresh hidden path inside the track directory, for writes moved into place by rename. */
+  scratchPath(trackId: string): string;
   removeTrack(trackId: string): Promise<void>;
 }
 
@@ -42,6 +47,12 @@ export function createMediaStorage(dataDir: string): MediaStorage {
   const incomingRoot = path.join(dataDir, "incoming");
   const trackDir = (trackId: string) => path.join(mediaRoot, safeId(trackId));
 
+  const removeOtherCovers = async (trackId: string, keep: CoverExt) => {
+    for (const ext of COVER_EXTS) {
+      if (ext !== keep) await rm(storage.coverPath(trackId, ext as CoverExt), { force: true });
+    }
+  };
+
   const storage: MediaStorage = {
     incomingDir(importId) {
       const dir = path.join(incomingRoot, safeId(importId));
@@ -59,6 +70,18 @@ export function createMediaStorage(dataDir: string): MediaStorage {
     },
     async writeCover(trackId, data, ext) {
       await writeFile(storage.coverPath(trackId, ext), data);
+      await removeOtherCovers(trackId, ext);
+    },
+    async replaceCover(trackId, file, ext) {
+      const relative = path.relative(trackDir(trackId), path.resolve(file));
+      if (relative === "" || relative.includes(path.sep) || relative.startsWith("..")) {
+        throw new Error("file outside track directory");
+      }
+      await rename(file, storage.coverPath(trackId, ext));
+      await removeOtherCovers(trackId, ext);
+    },
+    scratchPath(trackId) {
+      return path.join(trackDir(trackId), `.tmp-${crypto.randomUUID()}`);
     },
     async removeTrack(trackId) {
       await rm(trackDir(trackId), { recursive: true, force: true });

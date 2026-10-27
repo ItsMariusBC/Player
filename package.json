@@ -29,6 +29,8 @@
     "cva": "npm:class-variance-authority@^0.7.0",
     "framer-motion": "14.6.0",
     "hono": "4.13.14",
+    "metaflac-js": "1.1.0",
+    "node-id3": "0.2.9",
     "openid-client": "6.8.8",
     "react": "19.3.1",
     "react-dom": "19.3.1",

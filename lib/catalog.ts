@@ -20,6 +20,8 @@ export interface TrackDto {
   format: "flac" | "mp3" | "wav";
   hasCover: boolean;
   position: number;
+  /** ISO timestamp; bumped by every edit, including a cover change (cache busting with ?v=). */
+  updatedAt: string;
 }
 
 export interface Catalog {

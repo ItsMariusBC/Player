@@ -88,7 +88,9 @@ describe("GET /api/catalog", () => {
         "id",
         "position",
         "title",
+        "updatedAt",
       ]);
+      assert.equal(inA[0]?.updatedAt, now.toISOString());
     }
   });
 });

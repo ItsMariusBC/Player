@@ -35,3 +35,16 @@ export function clearSessionCookie(c: Context, config: AppConfig): void {
     secure: config.appUrl.protocol === "https:",
   });
 }
+
+/** Parses a JSON object body; null for invalid JSON, arrays and primitives. */
+export async function readJsonObject(c: Context): Promise<Record<string, unknown> | null> {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return null;
+  }
+  return typeof body === "object" && body !== null && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : null;
+}

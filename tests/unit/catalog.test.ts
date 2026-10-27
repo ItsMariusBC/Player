@@ -31,6 +31,7 @@ const track = (
   format: "mp3",
   hasCover,
   position,
+  updatedAt: "2026-10-27T00:00:00.000Z",
 });
 
 // Tree: A (with child A1), B. Tracks are given out of order on purpose.

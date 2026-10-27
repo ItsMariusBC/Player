@@ -4,7 +4,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { ImportQueue } from "./admin/imports.ts";
+import { adminFolderRoutes } from "./routes/admin-folders.ts";
 import { adminImportRoutes } from "./routes/admin-imports.ts";
+import { adminTrackRoutes } from "./routes/admin-tracks.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
 import { jsonError } from "./http.ts";
@@ -72,6 +74,8 @@ export function createApp(deps: AppDeps) {
   app.route("/api/media", mediaRoutes(deps, session));
 
   app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
+  app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
+  app.route("/api/admin/tracks", adminTrackRoutes({ ...deps, now }, session));
 
   deps.mount?.(app, session);
 

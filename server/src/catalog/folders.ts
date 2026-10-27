@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { renumber } from "./tracks.ts";
+import { inTransaction } from "./tx.ts";
 import {
   FolderConflictError,
   FolderCycleError,
@@ -19,7 +20,7 @@ function toRecord(row: FolderRow): FolderRecord {
   return { id: row.id, parentId: row.parent_id, name: row.name, position: row.position };
 }
 
-function getFolder(db: DatabaseSync, id: string): FolderRecord | null {
+export function getFolder(db: DatabaseSync, id: string): FolderRecord | null {
   const row = db
     .prepare("SELECT id, parent_id, name, position FROM folders WHERE id = ?")
     .get(id) as unknown as FolderRow | undefined;
@@ -79,12 +80,16 @@ function nextPosition(db: DatabaseSync, parentId: string | null): number {
   return row.next;
 }
 
-function renumberFolders(db: DatabaseSync, parentId: string | null): void {
+function siblingIds(db: DatabaseSync, parentId: string | null): string[] {
   const rows = db
     .prepare("SELECT id FROM folders WHERE parent_id IS ? ORDER BY position, created_at, rowid")
     .all(parentId) as unknown as { id: string }[];
+  return rows.map((row) => row.id);
+}
+
+function renumberFolders(db: DatabaseSync, parentId: string | null): void {
   const update = db.prepare("UPDATE folders SET position = ? WHERE id = ?");
-  rows.forEach((row, index) => update.run(index, row.id));
+  siblingIds(db, parentId).forEach((id, index) => update.run(index, id));
 }
 
 export function createFolder(
@@ -113,11 +118,16 @@ export function renameFolder(db: DatabaseSync, id: string, name: string, _now: D
   return { ...folder, name };
 }
 
+/**
+ * Moves a folder under parentId (null is the root). Without a position it goes to the end
+ * of its new parent, or stays in place when the parent does not change; siblings are renumbered.
+ */
 export function moveFolder(
   db: DatabaseSync,
   id: string,
   parentId: string | null,
   _now: Date,
+  position?: number,
 ): FolderRecord {
   const folder = requireFolder(db, id);
   if (parentId !== null) {
@@ -126,23 +136,20 @@ export function moveFolder(
       throw new FolderCycleError();
     }
   }
-  if (parentId === folder.parentId) return folder;
-  assertNameFree(db, parentId, folder.name, id);
-  db.exec("BEGIN");
-  try {
-    const position = nextPosition(db, parentId);
-    db.prepare("UPDATE folders SET parent_id = ?, position = ? WHERE id = ?").run(
-      parentId,
-      position,
-      id,
-    );
-    renumberFolders(db, folder.parentId);
-    db.exec("COMMIT");
-    return { ...folder, parentId, position };
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  const sameParent = parentId === folder.parentId;
+  if (sameParent && position === undefined) return folder;
+  if (!sameParent) assertNameFree(db, parentId, folder.name, id);
+  return inTransaction(db, () => {
+    const siblings = siblingIds(db, parentId).filter((siblingId) => siblingId !== id);
+    const index =
+      position === undefined ? siblings.length : Math.max(0, Math.min(position, siblings.length));
+    siblings.splice(index, 0, id);
+    db.prepare("UPDATE folders SET parent_id = ? WHERE id = ?").run(parentId, id);
+    const update = db.prepare("UPDATE folders SET position = ? WHERE id = ?");
+    siblings.forEach((siblingId, at) => update.run(at, siblingId));
+    if (!sameParent) renumberFolders(db, folder.parentId);
+    return { ...folder, parentId, position: index };
+  });
 }
 
 /** Without force the folder must be empty; with force its content moves up to the parent. */
@@ -158,20 +165,14 @@ export function deleteFolder(db: DatabaseSync, id: string, opts: { force: boolea
     .all(id) as unknown as { id: string; name: string }[];
   if (!opts.force) {
     if (trackIds.length > 0 || children.length > 0) throw new FolderNotEmptyError();
-    db.exec("BEGIN");
-    try {
+    inTransaction(db, () => {
       db.prepare("DELETE FROM folders WHERE id = ?").run(id);
       renumberFolders(db, folder.parentId);
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
+    });
     return;
   }
   for (const child of children) assertNameFree(db, folder.parentId, child.name, id);
-  db.exec("BEGIN");
-  try {
+  inTransaction(db, () => {
     const trackBase = (
       db
         .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM tracks WHERE folder_id IS ?")
@@ -189,9 +190,5 @@ export function deleteFolder(db: DatabaseSync, id: string, opts: { force: boolea
     db.prepare("DELETE FROM folders WHERE id = ?").run(id);
     renumberFolders(db, folder.parentId);
     renumber(db, folder.parentId);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 }

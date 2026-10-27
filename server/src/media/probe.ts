@@ -56,7 +56,8 @@ async function readHead(path: string): Promise<Buffer> {
   }
 }
 
-async function hashFile(path: string): Promise<string> {
+/** Streamed SHA-256 of a file, hex encoded. */
+export async function hashFile(path: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest("hex");

@@ -14,6 +14,17 @@ CREATE TABLE sessions (id_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCE
 CREATE INDEX sessions_user_id ON sessions(user_id);
 `,
   },
+  {
+    id: 2,
+    sql: `
+CREATE TABLE folders (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES folders(id) ON DELETE RESTRICT, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(parent_id, name));
+CREATE TABLE tracks (id TEXT PRIMARY KEY, folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL, title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '', duration_ms INTEGER, format TEXT NOT NULL CHECK (format IN ('flac','mp3','wav')), size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL UNIQUE, cover_ext TEXT, status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','failed')), position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE INDEX tracks_folder_position ON tracks(folder_id, position);
+CREATE TABLE imports (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), filename TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('processing','ready','failed')), error TEXT, track_id TEXT REFERENCES tracks(id) ON DELETE SET NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE admin_events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), action TEXT NOT NULL, track_id TEXT, folder_id TEXT, detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE favorites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, created_at TEXT NOT NULL, PRIMARY KEY (user_id, track_id));
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

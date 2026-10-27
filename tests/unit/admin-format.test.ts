@@ -7,6 +7,7 @@ import {
   formatDuration,
   INBOX_LABEL,
   sortTracksByPosition,
+  tagsStatusLabel,
   tracksInFolder,
 } from "../../lib/admin-format";
 import type { FolderNode, TrackDto } from "../../lib/catalog";
@@ -107,5 +108,13 @@ describe("formatDuration", () => {
 
   test("unknown duration", () => {
     expect(formatDuration(null)).toBe("--:--");
+  });
+});
+
+describe("tagsStatusLabel", () => {
+  test("written, not written for a WAV, not written otherwise", () => {
+    expect(tagsStatusLabel(true, "flac")).toBe("Tags écrits dans le fichier");
+    expect(tagsStatusLabel(false, "wav")).toBe("Tags non écrits (WAV)");
+    expect(tagsStatusLabel(false, "mp3")).toBe("Tags non écrits");
   });
 });

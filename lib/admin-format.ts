@@ -94,3 +94,12 @@ export function formatDuration(durationMs: number | null): string {
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
+
+/**
+ * Outcome of a tag save. tagsWritten is also false for a failed MP3/FLAC write or a sha
+ * collision, so « (WAV) » is only said of a WAV file.
+ */
+export function tagsStatusLabel(tagsWritten: boolean, format: TrackDto["format"]): string {
+  if (tagsWritten) return "Tags écrits dans le fichier";
+  return format === "wav" ? "Tags non écrits (WAV)" : "Tags non écrits";
+}

@@ -122,6 +122,7 @@ describe("import calls", () => {
 
 class FakeXhr {
   static last: FakeXhr;
+  static created = 0;
   method = "";
   url = "";
   headers: Record<string, string> = {};
@@ -139,6 +140,7 @@ class FakeXhr {
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
   constructor() {
+    FakeXhr.created += 1;
     FakeXhr.last = this;
   }
   open(method: string, url: string) {
@@ -196,5 +198,42 @@ describe("uploadFile", () => {
     const error = await pending.catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("network_error");
+  });
+
+  test("aborting the signal aborts the request", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const controller = new AbortController();
+    const pending = uploadFile(file(), () => {}, { signal: controller.signal });
+    controller.abort();
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("aborted");
+  });
+
+  test("an already aborted signal never sends", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const controller = new AbortController();
+    controller.abort();
+    const before = FakeXhr.created;
+    const pending = uploadFile(file(), () => {}, { signal: controller.signal });
+    const error = await pending.catch((e: unknown) => e);
+    expect((error as ApiError).code).toBe("aborted");
+    expect(FakeXhr.created).toBe(before);
+  });
+
+  test("the abort listener is removed after the request settles", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const signal = {
+      aborted: false,
+      addEventListener: (_type: string, listener: unknown) => added.push(listener),
+      removeEventListener: (_type: string, listener: unknown) => removed.push(listener),
+    } as unknown as AbortSignal;
+    const pending = uploadFile(file(), () => {}, { signal });
+    FakeXhr.last.respond(202, { importId: "imp" });
+    await pending;
+    expect(added).toHaveLength(1);
+    expect(removed).toEqual(added);
   });
 });

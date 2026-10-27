@@ -110,7 +110,15 @@ export function uploadFile(
   opts: { signal?: AbortSignal } = {},
 ): Promise<{ importId: string }> {
   return new Promise((resolve, reject) => {
+    const { signal } = opts;
+    if (signal?.aborted) {
+      reject(new ApiError(0, "aborted", "Envoi annulé"));
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    const onAbortSignal = () => xhr.abort();
+    // Settled requests drop the listener so a long-lived signal keeps no reference to them.
+    const settle = () => signal?.removeEventListener("abort", onAbortSignal);
     xhr.open("POST", "/api/admin/imports");
     xhr.withCredentials = true;
     xhr.setRequestHeader("X-Requested-With", "player");
@@ -119,6 +127,7 @@ export function uploadFile(
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
     };
     xhr.onload = () => {
+      settle();
       if (xhr.status < 200 || xhr.status >= 300) {
         reject(toApiError(xhr.status, xhr.statusText, xhr.responseText));
         return;
@@ -131,15 +140,15 @@ export function uploadFile(
         reject(new ApiError(xhr.status, "bad_response", "Réponse inattendue du serveur"));
       }
     };
-    xhr.onerror = () => reject(new ApiError(0, "network_error", "Envoi interrompu"));
-    xhr.onabort = () => reject(new ApiError(0, "aborted", "Envoi annulé"));
-    if (opts.signal) {
-      if (opts.signal.aborted) {
-        reject(new ApiError(0, "aborted", "Envoi annulé"));
-        return;
-      }
-      opts.signal.addEventListener("abort", () => xhr.abort(), { once: true });
-    }
+    xhr.onerror = () => {
+      settle();
+      reject(new ApiError(0, "network_error", "Envoi interrompu"));
+    };
+    xhr.onabort = () => {
+      settle();
+      reject(new ApiError(0, "aborted", "Envoi annulé"));
+    };
+    signal?.addEventListener("abort", onAbortSignal, { once: true });
     const body = new FormData();
     body.append("file", file);
     xhr.send(body);

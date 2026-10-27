@@ -59,6 +59,7 @@ export function ContextMenu({
   label,
   prompt,
   items,
+  initialFocusId,
   onClose,
 }: {
   x: number;
@@ -68,6 +69,8 @@ export function ContextMenu({
   /** Question shown above the items (inline confirmations). */
   prompt?: string;
   items: MenuItem[];
+  /** Item focused when the content appears; the first one by default. */
+  initialFocusId?: string;
   onClose: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -89,11 +92,14 @@ export function ContextMenu({
     setFlipSub(left + width * 2 + EDGE > window.innerWidth);
   }, [x, y, signature]);
 
-  // Focus the first item when opened and whenever the content changes (confirmation step).
+  // Focus the initial item when opened and whenever the content changes (confirmation step:
+  // the caller points it at « Non », never at the destructive answer).
   useEffect(() => {
     setOpenSub(null);
-    moveFocus(menuRef.current, "first");
-  }, [signature]);
+    const initial = initialFocusId ? document.getElementById(`menuitem-${initialFocusId}`) : null;
+    if (initial && menuRef.current?.contains(initial)) initial.focus();
+    else moveFocus(menuRef.current, "first");
+  }, [signature, initialFocusId]);
 
   // Give focus back to what had it (the row) when the menu goes away, unless the user
   // already moved it elsewhere (an outside click on another control).

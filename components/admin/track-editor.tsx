@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { TrackPatch } from "@/lib/admin-api";
 import { type TrackDto, coverUrl } from "@/lib/catalog";
 import { inputClass } from "@/components/admin/folder-tree";
+import { tagsStatusLabel } from "@/lib/admin-format";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
@@ -25,8 +26,11 @@ export function TrackEditor({
   /** Outcome of the last save of this track, undefined before any save. */
   tagsWritten?: boolean;
   busy: boolean;
-  /** Bumped by « Modifier »: focuses the title field. */
-  focusRequest: number;
+  /**
+   * Set by « Modifier »: the title field takes the focus when the token names this track
+   * and is newer than the last one honoured (so a remount for another track never steals it).
+   */
+  focusRequest: { trackId: string; n: number } | null;
   onSave: (patch: TrackPatch) => void;
   onReplaceCover: (file: File) => void;
 }) {
@@ -35,10 +39,14 @@ export function TrackEditor({
   const [album, setAlbum] = useState(track.album);
   const titleRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const honoured = useRef(0);
 
   useEffect(() => {
-    if (focusRequest > 0) titleRef.current?.focus();
-  }, [focusRequest]);
+    if (!focusRequest || focusRequest.trackId !== track.id) return;
+    if (focusRequest.n <= honoured.current) return;
+    honoured.current = focusRequest.n;
+    titleRef.current?.focus();
+  }, [focusRequest, track.id]);
 
   // Only the changed fields are sent; an unchanged form has nothing to save.
   const patch: TrackPatch = {};
@@ -133,7 +141,7 @@ export function TrackEditor({
         </button>
         {tagsWritten !== undefined && (
           <span role="status" className="text-xs text-purple-200/60">
-            {tagsWritten ? "Tags écrits dans le fichier" : "Tags non écrits (WAV)"}
+            {tagsStatusLabel(tagsWritten, track.format)}
           </span>
         )}
       </div>

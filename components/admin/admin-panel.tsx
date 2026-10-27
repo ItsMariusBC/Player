@@ -57,9 +57,12 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Runs in flight (a drag-move may overlap a save): the editor is disabled while any is.
+  const [inFlight, setInFlight] = useState(0);
   const [lastSave, setLastSave] = useState<{ trackId: string; tagsWritten: boolean } | null>(null);
-  const [focusRequest, setFocusRequest] = useState(0);
+  const [focusRequest, setFocusRequest] = useState<{ trackId: string; n: number } | null>(null);
+  // Never reset, so a new request is always newer than any the editor already honoured.
+  const focusCounter = useRef(0);
   const firstItemRef = useRef<HTMLButtonElement>(null);
 
   // A folder or track that disappeared (deleted, moved by someone else) falls back cleanly.
@@ -89,7 +92,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
   /** Runs one mutation, then reloads both catalogues. Never swallows an error. */
   const run = useCallback(
     async (action: () => Promise<unknown>): Promise<boolean> => {
-      setBusy(true);
+      setInFlight((n) => n + 1);
       try {
         await action();
         await Promise.all([refreshAdmin(), onCatalogChanged()]);
@@ -98,7 +101,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
         showError(error);
         return false;
       } finally {
-        setBusy(false);
+        setInFlight((n) => n - 1);
       }
     },
     [refreshAdmin, onCatalogChanged, showError],
@@ -143,15 +146,27 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
   const selectFolder = (id: string | null) => {
     if (id !== folderId) setSelectedTrackId(null);
     setSelectedFolderId(id);
+    setFocusRequest(null);
   };
 
-  const menuItems = (state: MenuState): { items: MenuItem[]; prompt?: string; label: string } => {
+  // A plain selection (click, Enter, right click) never moves the focus into the editor;
+  // only « Modifier » sets a focus request, and the next selection drops it.
+  const selectTrack = (id: string) => {
+    setSelectedTrackId(id);
+    setFocusRequest(null);
+  };
+
+  const menuItems = (
+    state: MenuState,
+  ): { items: MenuItem[]; prompt?: string; label: string; initialFocusId?: string } => {
     if (state.kind === "track") {
       const track = tracks.find((t) => t.id === state.id);
       if (state.step === "confirm") {
         return {
           label: "Supprimer le titre",
           prompt: "Supprimer définitivement ?",
+          // « Oui » stays first visually, but a repeated Enter must not delete.
+          initialFocusId: "confirm-no",
           items: [
             {
               id: "confirm-yes",
@@ -198,7 +213,8 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
             onSelect: () => {
               closeMenu();
               setSelectedTrackId(state.id);
-              setFocusRequest((n) => n + 1);
+              focusCounter.current += 1;
+              setFocusRequest({ trackId: state.id, n: focusCounter.current });
             },
           },
           { id: "move", label: "Déplacer vers…", submenu: targets },
@@ -227,6 +243,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
       return {
         label: "Supprimer le dossier",
         prompt: `Le dossier contient ${itemsLabel(count)}, les remonter dans le parent ?`,
+        initialFocusId: "confirm-no",
         items: [
           {
             id: "confirm-yes",
@@ -341,7 +358,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
           <TrackTable
             tracks={visibleTracks}
             selectedId={selectedTrack?.id ?? null}
-            onSelect={setSelectedTrackId}
+            onSelect={selectTrack}
             onTrackMenu={(id, x, y) => setMenu({ kind: "track", id, x, y, step: "main" })}
           />
         </section>
@@ -353,7 +370,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
               track={selectedTrack}
               folderLabel={buildFolderPathLabel(folders, selectedTrack.folderId)}
               tagsWritten={lastSave?.trackId === selectedTrack.id ? lastSave.tagsWritten : undefined}
-              busy={busy}
+              busy={inFlight > 0}
               focusRequest={focusRequest}
               onSave={(patch) => saveTrack(selectedTrack.id, patch)}
               onReplaceCover={(file) =>
@@ -373,6 +390,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
           label={openMenu.label}
           prompt={openMenu.prompt}
           items={openMenu.items}
+          initialFocusId={openMenu.initialFocusId}
           onClose={closeMenu}
         />
       )}

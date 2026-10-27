@@ -236,3 +236,21 @@ export function listImports(limit?: number): Promise<ImportDto[]> {
 export function getLimits(): Promise<{ maxUploadBytes: number }> {
   return api<{ maxUploadBytes: number }>("/api/admin/limits");
 }
+
+/** Loudness measurement progress of the ready tracks (GET /api/admin/loudness). */
+export interface LoudnessStatus {
+  total: number;
+  measured: number;
+  pending: number;
+  /** false when the server cannot run ffmpeg. */
+  available: boolean;
+}
+
+export function getLoudnessStatus(): Promise<LoudnessStatus> {
+  return api<LoudnessStatus>("/api/admin/loudness");
+}
+
+/** Queues the measurement of every unmeasured track; resolves with the number queued. */
+export function backfillLoudness(): Promise<{ queued: number }> {
+  return api<{ queued: number }>("/api/admin/loudness/backfill", { method: "POST" });
+}

@@ -39,7 +39,7 @@ Les membres du groupe `admin` voient un bouton à côté de la déconnexion, qui
 
 Tout utilisateur connecté peut proposer un titre au catalogue : bouton « Demander un son » sous la file d'attente (recherche chez les fournisseurs ou saisie libre, suivi dans « Mes demandes »). Les administrateurs les traitent dans l'onglet « Demandes » du panneau d'administration (valider ou supprimer).
 
-Les modifications de titre, d'artiste et d'album sont aussi écrites dans les tags du fichier, au mieux : MP3 et FLAC oui, WAV jamais (le catalogue reste la référence). Une panne de l'écriture de tags n'annule pas la modification. La taille maximale d'un import se règle avec `MAX_UPLOAD_MB` (200 par défaut). La recherche de métadonnées demande une sortie HTTPS du serveur vers les fournisseurs ; sans elle, le reste fonctionne. Détails des routes et des couches dans [docs/architecture.md](docs/architecture.md), exploitation dans [docs/ci.md](docs/ci.md).
+Les modifications de titre, d'artiste et d'album sont aussi écrites dans les tags du fichier, au mieux : MP3 et FLAC oui, WAV jamais (le catalogue reste la référence). Une panne de l'écriture de tags n'annule pas la modification. La taille maximale d'un import se règle avec `MAX_UPLOAD_MB` (200 par défaut). La recherche de métadonnées demande une sortie HTTPS du serveur vers les fournisseurs ; sans elle, le reste fonctionne. Le volume des titres est normalisé à la lecture (cible -14 LUFS) d'après une mesure ffmpeg faite à l'import ; les titres plus anciens se rattrapent depuis l'onglet Catalogue de l'administration (`FFMPEG_PATH` règle le binaire). Détails des routes et des couches dans [docs/architecture.md](docs/architecture.md), exploitation dans [docs/ci.md](docs/ci.md).
 
 ## Branches et livraison
 

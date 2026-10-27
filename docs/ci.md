@@ -127,10 +127,11 @@ Après un déploiement, avec Authentik réel :
 1. Se connecter avec un compte du groupe `admin` : le bouton d'administration apparaît à côté de la déconnexion et ouvre le panneau.
 2. Importer un fichier FLAC, MP3 ou WAV (zone de dépôt, clic ou glisser-déposer) : l'import passe de `processing` à `ready` et le titre apparaît dans la liste et dans le lecteur après rafraîchissement du catalogue (60 s au plus).
 3. Déposer le même fichier : l'import échoue avec la raison `duplicate`.
-4. Modifier titre, artiste, album, dossier, pochette ; vérifier la lecture et la pochette mises à jour.
-5. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
-6. Supprimer le titre de test et le dossier de test.
-7. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
+4. Après la migration 4 (volume) : dans l'onglet Catalogue, la ligne « Volume : n titres sur m analysés » s'affiche ; cliquer sur « Analyser les titres restants » et suivre les compteurs jusqu'à ce que tous les titres soient analysés (le bouton se désactive). Si la ligne indique « ffmpeg introuvable sur le serveur », vérifier `FFMPEG_PATH` (voir `.env.example`) ; l'image Docker embarque ffmpeg.
+5. Modifier titre, artiste, album, dossier, pochette ; vérifier la lecture et la pochette mises à jour.
+6. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
+7. Supprimer le titre de test et le dossier de test.
+8. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
 
 ### Recette des demandes de sons
 

@@ -92,6 +92,18 @@ Le job `deploy:stack` valide un environnement Docker éphémère. L'instance ré
 
 Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/auto-deploy) pour le déclenchement par API après CI.
 
+### Migration du catalogue
+
+Le script importe un dossier de fichiers audio existant (récursif) dans le catalogue, sans jamais modifier ni supprimer les fichiers sources. Les sous-dossiers deviennent des dossiers du catalogue ; le manifeste (`music/data.json`) fournit titre, artiste, dossier et pochette. Sauvegarder d'abord le volume `/data`. Copier `music/data.json` à côté des médias, puis :
+
+```
+docker compose run --rm -v ./public:/import player node dist/server/migrate-catalog.js /import --manifest /import/data.json
+```
+
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué.
+
+Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
+
 ## Promotion et retour arrière
 
 Ouvrir une PR de `developpment` vers `production`, attendre `CI required`, puis fusionner. Les deux branches exigent ce contrôle à jour et la résolution des conversations ; les force-push et suppressions sont refusés. Aucun autre approbateur n’est imposé sur ce dépôt personnel.

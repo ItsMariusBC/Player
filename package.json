@@ -9,6 +9,7 @@
     "dev:oidc": "node --watch server/dev/mock-oidc.ts",
     "build": "vite build && yarn build:server",
     "build:server": "tsc -p server/tsconfig.json",
+    "migrate:catalog": "node --no-warnings=ExperimentalWarning server/src/migrate-catalog.ts",
     "start": "node --no-warnings=ExperimentalWarning dist/server/main.js",
     "preview": "vite preview",
     "generate:music": "node music/generate.mjs",

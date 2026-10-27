@@ -89,7 +89,9 @@ test("admin imports a track, files it in a new folder and finds it in the queue"
   await expect(queueFolder).toBeVisible();
   if ((await queueFolder.getAttribute("aria-expanded")) !== "true") await queueFolder.click();
   await expect(queueFolder).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByRole("button", { name: new RegExp(title.split("\n")[0].trim()) }).first()).toBeVisible();
+  const plainTitle = title.split("\n")[0].trim();
+  expect(plainTitle).not.toBe("");
+  await expect(page.getByRole("button", { name: plainTitle }).first()).toBeVisible();
 });
 
 test("admin renames a track with the editor", async ({ page }) => {
@@ -125,5 +127,6 @@ test("user cannot reach the admin API nor the admin button", async ({ page }) =>
 
   const response = await page.request.get("/api/admin/folders");
   expect(response.status()).toBe(403);
+  await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Administration" })).toHaveCount(0);
 });

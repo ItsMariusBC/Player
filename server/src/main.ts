@@ -64,11 +64,6 @@ const oidc = await discoverOidc();
 const storage = createMediaStorage(config.dataDir);
 await recoverStaleImports({ db, storage, log });
 const maintenance = createMaintenance({ db, storage, log });
-await maintenance
-  .run()
-  .catch((error) =>
-    log("maintenance.failed", { error: error instanceof Error ? error.name : "unknown" }),
-  );
 scheduleMaintenance(maintenance, {
   intervalMs: config.maintenanceIntervalHours * 3_600_000,
   log,
@@ -123,6 +118,13 @@ const app = createApp({
 const server = serve({ fetch: app.fetch, port: config.port }, (info) =>
   log("listening", { port: info.port }),
 );
+
+// Not awaited: a slow pass (large data directory) must not delay readiness.
+void maintenance
+  .run()
+  .catch((error) =>
+    log("maintenance.failed", { error: error instanceof Error ? error.name : "unknown" }),
+  );
 
 function shutdown() {
   server.close(() => {

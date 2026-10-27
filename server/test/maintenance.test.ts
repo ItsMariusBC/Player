@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
@@ -40,16 +40,28 @@ function seedTrack(id: string) {
   );
 }
 
-function mediaDir(name: string): string {
+const HOUR = 3_600_000;
+
+/** Sets the mtime of a directory and of its direct children, relative to the test clock. */
+function setAge(dir: string, ageMs: number) {
+  const at = new Date(t.now().getTime() - ageMs);
+  for (const entry of readdirSync(dir)) utimesSync(path.join(dir, entry), at, at);
+  utimesSync(dir, at, at);
+}
+
+/** Directories are aged 2 h by default, past the 1 h grace period; pass ageMs to change that. */
+function mediaDir(name: string, ageMs = 2 * HOUR): string {
   const dir = path.join(t.tempDir, "media", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "original.wav"), "x");
+  setAge(dir, ageMs);
   return dir;
 }
 
-function incomingDir(name: string): string {
+function incomingDir(name: string, ageMs = 2 * HOUR): string {
   const dir = path.join(t.tempDir, "incoming", name);
   mkdirSync(dir, { recursive: true });
+  setAge(dir, ageMs);
   return dir;
 }
 
@@ -132,12 +144,94 @@ describe("maintenance pass", () => {
     assert.deepEqual(importIds(), ["failed-new", "processing-old", "ready-mid"]);
   });
 
-  it("leaves row-less media alone while an import is processing", async () => {
+  it("keeps a media directory younger than the grace period", async () => {
     t = createTestApp();
-    seedImport(uuid(), "processing", 0);
+    const young = mediaDir(uuid(), 10 * 60_000);
+    assert.equal((await runMaintenance(deps())).orphanMedia, 0);
+    assert.equal(existsSync(young), true);
+    t.advance(2 * HOUR);
+    assert.equal((await runMaintenance(deps())).orphanMedia, 1);
+    assert.equal(existsSync(young), false);
+  });
+
+  it("keeps an incoming directory younger than the grace period even without a row", async () => {
+    t = createTestApp();
+    const young = incomingDir(uuid(), 10 * 60_000);
+    assert.equal((await runMaintenance(deps())).orphanIncoming, 0);
+    assert.equal(existsSync(young), true);
+  });
+
+  it("honours an injected grace period", async () => {
+    t = createTestApp();
+    const dir = incomingDir(uuid(), 10 * 60_000);
+    assert.equal((await runMaintenance({ ...deps(), graceMs: 60_000 })).orphanIncoming, 1);
+    assert.equal(existsSync(dir), false);
+  });
+
+  it("keeps an old directory holding a recently written file", async () => {
+    t = createTestApp();
     const dir = mediaDir(uuid());
+    const file = path.join(dir, "original.wav");
+    const recent = new Date(t.now().getTime() - 5 * 60_000);
+    utimesSync(file, recent, recent);
     assert.equal((await runMaintenance(deps())).orphanMedia, 0);
     assert.equal(existsSync(dir), true);
+  });
+
+  it("keeps a media directory whose track appeared after the snapshot", async () => {
+    t = createTestApp();
+    const id = uuid();
+    const dir = mediaDir(id);
+    const result = await runMaintenance({
+      ...deps(),
+      afterSnapshot: (kind, name) => {
+        if (kind === "media" && name === id) seedTrack(id);
+      },
+    });
+    assert.equal(result.orphanMedia, 0);
+    assert.equal(existsSync(dir), true);
+  });
+
+  it("keeps an incoming directory whose import started after the snapshot", async () => {
+    t = createTestApp();
+    const id = uuid();
+    const dir = incomingDir(id);
+    const result = await runMaintenance({
+      ...deps(),
+      afterSnapshot: (kind, name) => {
+        if (kind === "incoming" && name === id) seedImport(id, "processing", 0);
+      },
+    });
+    assert.equal(result.orphanIncoming, 0);
+    assert.equal(existsSync(dir), true);
+  });
+
+  it("carries on with the pruning phase when a listing fails", async () => {
+    t = createTestApp();
+    seedImport("failed-old", "failed", 31);
+    const orphan = incomingDir(uuid());
+    const storage = {
+      ...t.storage,
+      listMedia: async () => {
+        throw new Error("EIO");
+      },
+    };
+    const result = await runMaintenance({ ...deps(), storage });
+    assert.equal(result.orphanMedia, 0);
+    assert.equal(result.orphanIncoming, 1);
+    assert.equal(result.prunedImports, 1);
+    assert.equal(existsSync(orphan), false);
+    assert.equal(t.log.filter((e) => e.event === "maintenance.list_failed").length, 1);
+  });
+
+  it("ignores non-UUID incoming entries and logs them once", async () => {
+    t = createTestApp();
+    const odd = incomingDir("not-a-uuid");
+    const maintenance = createMaintenance(deps());
+    assert.equal((await maintenance.run()).orphanIncoming, 0);
+    await maintenance.run();
+    assert.equal(existsSync(odd), true);
+    assert.equal(t.log.filter((e) => e.event === "maintenance.unknown_entry").length, 1);
   });
 
   it("logs a failing removal and carries on", async () => {

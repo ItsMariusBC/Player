@@ -213,6 +213,13 @@ export function formatBytes(bytes: number): string {
   return `${text.replace(".", ",")} ${units[unit]}`;
 }
 
+const HEALTH_REASON_LABELS: Record<string, string> = {
+  low_disk: "espace disque faible",
+  migrations_pending: "migrations en attente",
+  data_dir_unavailable: "dossier de données inaccessible",
+  db_unavailable: "base de données inaccessible",
+};
+
 /** "Système : v1.2.3 · 12,4 Go libres · migrations 6/6", plus the reasons when degraded. */
 export function healthLabel(report: HealthReport): string {
   const parts = [
@@ -221,7 +228,7 @@ export function healthLabel(report: HealthReport): string {
     `migrations ${report.migrations.applied}/${report.migrations.expected}`,
   ];
   let label = parts.join(" · ");
-  if (report.status === "degraded") label += ` · dégradé : ${report.reasons.join(", ")}`;
+  if (report.status === "degraded") label += ` · dégradé : ${report.reasons.map((r) => HEALTH_REASON_LABELS[r] ?? r).join(", ")}`;
   return label;
 }
 

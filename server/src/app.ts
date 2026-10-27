@@ -36,7 +36,7 @@ export interface AppDeps {
   metadata?: MetadataSearch;
   /** Maintenance passes; its admin routes are not mounted when omitted. */
   maintenance?: Maintenance;
-  /** Health evaluation; `/healthz` answers a bare ok and the admin route is absent when omitted. */
+  /** Health: `/healthz` answers from the lightweight `check()`; the admin route is absent when omitted. */
   health?: Health;
   now?: () => Date;
   staticDir?: string;
@@ -67,7 +67,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.get("/healthz", async (c) => {
-    const report = deps.health ? await deps.health.evaluate() : null;
+    const report = deps.health ? await deps.health.check() : null;
     if (report && report.status !== "ok") {
       c.header("Cache-Control", "no-store");
       return c.text("degraded\n", 503);

@@ -260,12 +260,24 @@ describe("system labels", () => {
         migrations: { applied: 5, expected: 6 },
       }),
     ).toBe(
-      "Système : v1.2.3 · 12,4 Go libres · migrations 5/6 · dégradé : low_disk, migrations_pending",
+      "Système : v1.2.3 · 12,4 Go libres · migrations 5/6 · dégradé : espace disque faible, migrations en attente",
     );
     expect(
       healthLabel({ ...report, reasons: ["data_dir_unavailable"], status: "degraded", disk: null }),
     ).toBe(
-      "Système : v1.2.3 · espace disque inconnu · migrations 6/6 · dégradé : data_dir_unavailable",
+      "Système : v1.2.3 · espace disque inconnu · migrations 6/6 · dégradé : dossier de données inaccessible",
+    );
+  });
+
+  test("healthLabel maps db_unavailable and shows unknown codes raw", () => {
+    expect(
+      healthLabel({
+        ...report,
+        status: "degraded",
+        reasons: ["db_unavailable", "mystery" as never],
+      }),
+    ).toBe(
+      "Système : v1.2.3 · 12,4 Go libres · migrations 6/6 · dégradé : base de données inaccessible, mystery",
     );
   });
 

@@ -318,7 +318,11 @@ export interface MaintenanceStatus {
   running: boolean;
 }
 
-export type HealthReason = "migrations_pending" | "low_disk" | "data_dir_unavailable";
+export type HealthReason =
+  | "migrations_pending"
+  | "low_disk"
+  | "data_dir_unavailable"
+  | "db_unavailable";
 
 /** GET /api/admin/health (server/src/health.ts). */
 export interface HealthReport {

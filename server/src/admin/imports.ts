@@ -12,6 +12,9 @@ import { resolveHost } from "../metadata/fetch-guard.ts";
 /** Imports allowed in `processing` at once; further requests are answered 429 `too_many_imports`. */
 export const MAX_PROCESSING_IMPORTS = 50;
 
+/** How long a failed ffmpeg probe is trusted before the binary is probed again. */
+const NEGATIVE_PROBE_TTL_MS = 5 * 60 * 1000;
+
 /** Downloads running at once; further ones wait for a slot. */
 const DOWNLOAD_SLOTS = 2;
 
@@ -79,8 +82,10 @@ export function createImportQueue(deps: {
   const ffmpegPath = deps.ffmpegPath ?? "ffmpeg";
   const measure = deps.measure ?? ((file: string) => measureLoudness(file, { ffmpegPath, log }));
   const checkAvailable = deps.ffmpegAvailable ?? (() => probeFfmpeg(ffmpegPath));
-  // Only a positive probe is cached: a missing binary is re-checked on each status call.
+  // A positive probe is cached for good; a negative one for 5 minutes, so status calls never
+  // spawn a process each time yet a freshly installed binary is noticed.
   let availableCached = false;
+  let availableCheckedAt: number | null = null;
   let backfilling = false;
   const inFlight = new Set<string>();
   const downloads = new Set<Promise<void>>();
@@ -318,7 +323,14 @@ export function createImportQueue(deps: {
            FROM tracks WHERE status = 'ready'`,
         )
         .get() as unknown as { total: number; measured: number; failed: number; pending: number };
-      if (!availableCached) availableCached = await checkAvailable().catch(() => false);
+      if (
+        !availableCached &&
+        (availableCheckedAt === null ||
+          now().getTime() - availableCheckedAt >= NEGATIVE_PROBE_TTL_MS)
+      ) {
+        availableCached = await checkAvailable().catch(() => false);
+        availableCheckedAt = now().getTime();
+      }
       return {
         total: counts.total,
         measured: counts.measured,

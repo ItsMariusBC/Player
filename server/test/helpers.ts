@@ -25,9 +25,11 @@ export interface TestAppOptions {
   /** Loudness measurement used by imports and the backfill; ffmpeg never runs in tests. */
   measure?: (file: string) => Promise<Loudness | null>;
   /** Whether ffmpeg counts as available (default true). */
-  ffmpegAvailable?: boolean;
+  ffmpegAvailable?: boolean | (() => Promise<boolean>);
   /** Disk stats used by the health check; defaults to plenty of free space. */
   statfs?: StatfsFn;
+  /** Disk probe timeout of the health check, in ms. */
+  statfsTimeoutMs?: number;
   version?: string;
   /** Migrations the code is expected to have applied (default: all of them). */
   migrationsExpected?: number;
@@ -97,7 +99,10 @@ export function createTestApp(opts: TestAppOptions = {}) {
     log: logger,
     now: clock,
     measure: opts.measure ?? (async () => null),
-    ffmpegAvailable: async () => opts.ffmpegAvailable ?? true,
+    ffmpegAvailable:
+      typeof opts.ffmpegAvailable === "function"
+        ? opts.ffmpegAvailable
+        : async () => opts.ffmpegAvailable ?? true,
     download: {
       maxBytes: config.maxUploadBytes,
       fetch:
@@ -125,6 +130,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     ffmpegAvailable: async () => (await imports.loudnessStatus()).available,
     maintenance,
     migrationsExpected: opts.migrationsExpected,
+    statfsTimeoutMs: opts.statfsTimeoutMs,
     now: clock,
   });
   const metadata = createMetadataSearch({

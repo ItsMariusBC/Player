@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { HealthReport } from "../src/health.ts";
+import { createImportQueue } from "../src/admin/imports.ts";
 import { createTestApp } from "./helpers.ts";
 
 const H = { "X-Requested-With": "fetch" };
@@ -141,6 +142,75 @@ describe("health", () => {
     assert.deepEqual(body.ffmpeg, { available: false });
     assert.equal(body.maintenance.lastRunAt, t.now().toISOString());
     assert.ok(body.maintenance.lastResult);
+  });
+
+  it("answers /healthz without counting or probing ffmpeg", async () => {
+    let probes = 0;
+    t = createTestApp({
+      statfs: disk(1000),
+      ffmpegAvailable: async () => {
+        probes += 1;
+        return true;
+      },
+    });
+    assert.equal((await t.app.request("/healthz")).status, 200);
+    assert.equal(probes, 0);
+    await detail(t.loginAs("admin"));
+    assert.equal(probes, 1);
+  });
+
+  it("answers 503 when statfs hangs past the timeout", async () => {
+    t = createTestApp({
+      statfs: () => new Promise(() => {}),
+      statfsTimeoutMs: 20,
+    });
+    const res = await t.app.request("/healthz");
+    assert.equal(res.status, 503);
+    assert.equal(await res.text(), "degraded\n");
+    const body = (await (await detail(t.loginAs("admin"))).json()) as HealthReport;
+    assert.deepEqual(body.reasons, ["data_dir_unavailable"]);
+  });
+
+  it("degrades instead of failing when the database errors", async () => {
+    t = createTestApp({ statfs: disk(1000) });
+    const cookie = t.loginAs("admin");
+    t.db.exec("DROP TABLE schema_migrations");
+    const res = await t.app.request("/healthz");
+    assert.equal(res.status, 503);
+    assert.equal(await res.text(), "degraded\n");
+    const full = await detail(cookie);
+    assert.equal(full.status, 200);
+    const body = (await full.json()) as HealthReport;
+    assert.equal(body.status, "degraded");
+    assert.ok(body.reasons.includes("db_unavailable"));
+  });
+
+  it("caches a negative ffmpeg probe for five minutes", async () => {
+    t = createTestApp();
+    let probes = 0;
+    let available = false;
+    const queue = createImportQueue({
+      db: t.db,
+      storage: t.storage,
+      now: t.now,
+      download: { maxBytes: 1 },
+      ffmpegAvailable: async () => {
+        probes += 1;
+        return available;
+      },
+    });
+    assert.equal((await queue.loudnessStatus()).available, false);
+    assert.equal((await queue.loudnessStatus()).available, false);
+    assert.equal(probes, 1);
+    available = true;
+    t.advance(4 * 60_000);
+    assert.equal((await queue.loudnessStatus()).available, false);
+    assert.equal(probes, 1);
+    t.advance(61_000);
+    assert.equal((await queue.loudnessStatus()).available, true);
+    assert.equal(probes, 2);
+    await queue.loudnessStatus();
+    assert.equal(probes, 2);
   });
 
   it("keeps the detail admin-only", async () => {

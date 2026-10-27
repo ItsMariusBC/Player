@@ -8,6 +8,9 @@ export type CoverExt = "jpg" | "png" | "webp";
 export interface MediaStorage {
   incomingDir(importId: string): string;
   removeIncoming(importId: string): Promise<void>;
+  /** Paths of the media/ and incoming/ directories of an id, without creating anything. */
+  mediaPath(trackId: string): string;
+  incomingPath(importId: string): string;
   /** Names of the directories under incoming/ (empty when none exists yet). */
   listIncoming(): Promise<string[]>;
   /** Names of the directories under media/ (empty when none exists yet). */
@@ -65,6 +68,8 @@ export function createMediaStorage(dataDir: string): MediaStorage {
       mkdirSync(dir, { recursive: true });
       return dir;
     },
+    mediaPath: (trackId) => trackDir(trackId),
+    incomingPath: (importId) => path.join(incomingRoot, safeId(importId)),
     async removeIncoming(importId) {
       await rm(path.join(incomingRoot, safeId(importId)), { recursive: true, force: true });
     },

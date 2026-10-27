@@ -1,3 +1,5 @@
+import { readdir, stat } from "node:fs/promises";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { MediaStorage } from "../media/storage.ts";
 
@@ -23,6 +25,8 @@ export interface Maintenance {
 type Log = (event: string, data?: Record<string, unknown>) => void;
 
 const DAY_MS = 86_400_000;
+/** An orphan directory younger than this is left alone: an import may be about to claim it. */
+export const MAINTENANCE_GRACE_MS = 60 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface MaintenanceDeps {
@@ -34,63 +38,107 @@ export interface MaintenanceDeps {
   maxImportAgeDays?: number;
   /** Ready imports older than this are deleted (default 90 days). */
   maxHistoryDays?: number;
+  /** Directories modified more recently than this are never removed (default 1 h). */
+  graceMs?: number;
+  /** Test seam: called after a candidate passed the age check, right before its fresh query. */
+  afterSnapshot?: (kind: "media" | "incoming", name: string) => void | Promise<void>;
 }
 
 /**
  * One maintenance pass: removes media directories without a track, incoming directories without
- * a processing import, and old finished imports. A failing removal is logged and skipped.
+ * a processing import, and old finished imports. A directory is only removed when its name is a
+ * UUID, it (and its direct children) is older than the grace period, and a fresh query right
+ * before the removal confirms no row claims it. A failing listing or removal is logged and skipped.
  */
 export async function runMaintenance(
   deps: MaintenanceDeps & { warned?: Set<string> },
 ): Promise<MaintenanceResult> {
   const { db, storage, log } = deps;
   const now = (deps.now ?? (() => new Date()))();
+  const graceMs = deps.graceMs ?? MAINTENANCE_GRACE_MS;
   const started = Date.now();
   const warned = deps.warned ?? new Set<string>();
+  const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown");
   const ids = (sql: string) =>
     new Set((db.prepare(sql).all() as { id: string }[]).map((r) => r.id));
+  const exists = (sql: string, id: string) => db.prepare(sql).get(id) !== undefined;
 
-  // A file is published before its track row exists: while an import is processing, a row-less
-  // media directory may be that import's, so media is left alone until none is running.
-  const processing = ids("SELECT id FROM imports WHERE state = 'processing'");
-  let orphanMedia = 0;
-  if (processing.size === 0) {
-    const tracks = ids("SELECT id FROM tracks");
-    for (const name of await storage.listMedia()) {
+  // Listings first, snapshots after: a row created in between is in the snapshot or the fresh query.
+  const list = async (kind: "media" | "incoming") => {
+    try {
+      return await (kind === "media" ? storage.listMedia() : storage.listIncoming());
+    } catch (error) {
+      log?.("maintenance.list_failed", { kind, error: errorName(error) });
+      return null;
+    }
+  };
+  const mediaNames = await list("media");
+  const incomingNames = await list("incoming");
+
+  /** True when the directory and its direct children were all modified before the cutoff. */
+  const isOld = async (dir: string) => {
+    let newest = (await stat(dir)).mtimeMs;
+    for (const child of await readdir(dir)) {
+      newest = Math.max(newest, (await stat(path.join(dir, child))).mtimeMs);
+    }
+    return now.getTime() - newest > graceMs;
+  };
+
+  const sweep = async (
+    kind: "media" | "incoming",
+    names: string[],
+    dirOf: (name: string) => string,
+    claimed: Set<string>,
+    claimedNow: string,
+    remove: (name: string) => Promise<void>,
+  ) => {
+    let removed = 0;
+    for (const name of names) {
       if (!UUID.test(name)) {
-        if (!warned.has(name)) {
-          warned.add(name);
-          log?.("maintenance.unknown_entry", { name });
+        if (!warned.has(`${kind}/${name}`)) {
+          warned.add(`${kind}/${name}`);
+          log?.("maintenance.unknown_entry", { kind, name });
         }
         continue;
       }
-      if (tracks.has(name)) continue;
+      if (claimed.has(name)) continue;
       try {
-        await storage.removeTrack(name);
-        orphanMedia += 1;
+        if (!(await isOld(dirOf(name)))) continue;
+        await deps.afterSnapshot?.(kind, name);
+        if (exists(claimedNow, name)) continue;
+        await remove(name);
+        removed += 1;
       } catch (error) {
-        log?.("maintenance.remove_failed", {
-          kind: "media",
-          name,
-          error: error instanceof Error ? error.name : "unknown",
-        });
+        log?.("maintenance.remove_failed", { kind, name, error: errorName(error) });
       }
     }
+    return removed;
+  };
+
+  let orphanMedia = 0;
+  if (mediaNames) {
+    const tracks = ids("SELECT id FROM tracks");
+    orphanMedia = await sweep(
+      "media",
+      mediaNames,
+      (name) => storage.mediaPath(name),
+      tracks,
+      "SELECT 1 FROM tracks WHERE id = ?",
+      (name) => storage.removeTrack(name),
+    );
   }
 
   let orphanIncoming = 0;
-  for (const name of await storage.listIncoming()) {
-    if (processing.has(name)) continue;
-    try {
-      await storage.removeIncoming(name);
-      orphanIncoming += 1;
-    } catch (error) {
-      log?.("maintenance.remove_failed", {
-        kind: "incoming",
-        name,
-        error: error instanceof Error ? error.name : "unknown",
-      });
-    }
+  if (incomingNames) {
+    const processing = ids("SELECT id FROM imports WHERE state = 'processing'");
+    orphanIncoming = await sweep(
+      "incoming",
+      incomingNames,
+      (name) => storage.incomingPath(name),
+      processing,
+      "SELECT 1 FROM imports WHERE id = ? AND state = 'processing'",
+      (name) => storage.removeIncoming(name),
+    );
   }
 
   const failedCutoff = new Date(now.getTime() - (deps.maxImportAgeDays ?? 30) * DAY_MS);

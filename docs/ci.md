@@ -102,7 +102,9 @@ Le script importe un dossier de fichiers audio existant (récursif) dans le cata
 docker compose run --rm -v <dossier-de-musique>:/import:ro -v <manifeste.json>:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
 ```
 
-En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue.
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue. Il écrit dans le même `DATA_DIR` que le serveur : le lancer avec `MAINTENANCE_INTERVAL_HOURS=0` ou serveur arrêté, car une passe d'entretien concurrente pourrait voir ses répertoires comme orphelins (le délai de grâce d'1 h `MAINTENANCE_GRACE_MS` ne protège que les répertoires récents).
+
+Santé : `/healthz` est la version légère (migrations et `statfs` du `DATA_DIR` en 2 s au plus, sans comptages ni ffmpeg) ; le détail complet est `GET /api/admin/health` (admin). `503 degraded` signifie « alerter, ne pas redémarrer » : une sonde de vivacité (liveness) ne doit pas pointer dessus, seulement la disponibilité (readiness) et l'alerte.
 
 Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
 

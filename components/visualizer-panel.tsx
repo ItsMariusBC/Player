@@ -59,7 +59,7 @@ export function VisualizerStage({ analyser, onClose }: { analyser: AnalyserNode;
   );
 }
 
-function PanelButton({
+export function PanelButton({
   label,
   onClick,
   className,

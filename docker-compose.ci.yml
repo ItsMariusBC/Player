@@ -1,0 +1,19 @@
+# Surcharge CI et essais locaux : OIDC contre le mock lancé sur l'hôte.
+# Aucune valeur ici n'est un secret : tout est réservé au développement.
+services:
+  player:
+    environment:
+      NODE_ENV: development
+      APP_URL: http://127.0.0.1:8080
+      PORT: "8080"
+      DATA_DIR: /data
+      OIDC_ISSUER: http://host.docker.internal:3002
+      OIDC_CLIENT_ID: player-dev
+      OIDC_CLIENT_SECRET: player-dev-secret
+      # Dev uniquement, jamais à réutiliser ailleurs.
+      SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      OIDC_GROUPS_CLAIM: groups
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"

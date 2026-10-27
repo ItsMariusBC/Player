@@ -14,12 +14,15 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: yarn test
+      - run: yarn test:server
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: player-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/
       - run: yarn playwright install --with-deps chromium
       - run: yarn test:e2e
+        env:
+          PLAYER_SKIP_BUILD: "1"
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

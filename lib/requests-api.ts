@@ -6,7 +6,7 @@ import type { MetadataSearchResult } from "@/lib/admin-api";
 
 export type { MetadataSearchResult, Proposal } from "@/lib/admin-api";
 
-export type SongRequestStatus = "pending" | "accepted";
+export type SongRequestStatus = "pending" | "accepted" | "added" | "rejected";
 
 /** Mirrors the server DTO; coverUrl is a provider URL copied server side, never sent by the client. */
 export interface SongRequestDto {
@@ -18,6 +18,9 @@ export interface SongRequestDto {
   source: "musicbrainz" | "deezer" | "itunes" | "manual";
   coverUrl: string | null;
   status: SongRequestStatus;
+  /** The catalogue track the request led to; null until added, or once that track is deleted. */
+  trackId: string | null;
+  rejectReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,4 +78,14 @@ export async function acceptRequest(requestId: string): Promise<AdminSongRequest
 
 export async function deleteRequest(requestId: string): Promise<void> {
   await api<void>(`/api/admin/requests/${id(requestId)}`, { method: "DELETE" });
+}
+
+export async function rejectRequest(
+  requestId: string,
+  reason?: string,
+): Promise<{ request: AdminSongRequestDto }> {
+  return api<{ request: AdminSongRequestDto }>(
+    `/api/admin/requests/${id(requestId)}/reject`,
+    json("POST", reason ? { reason } : {}),
+  );
 }

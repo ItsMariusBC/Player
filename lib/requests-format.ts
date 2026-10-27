@@ -3,8 +3,24 @@
 // No React here, so the Bun unit tests import them directly.
 import type { SongRequestDto, SongRequestStatus } from "@/lib/requests-api";
 
+const STATUS_LABELS: Record<SongRequestStatus, string> = {
+  pending: "En attente",
+  accepted: "Acceptée",
+  added: "Ajoutée",
+  rejected: "Refusée",
+};
+
 export function requestStatusLabel(status: SongRequestStatus): string {
-  return status === "accepted" ? "Validée" : "En attente";
+  return STATUS_LABELS[status];
+}
+
+/** The label, followed by « : motif » for a rejected request that has a reason. */
+export function requestStatusDetail(
+  request: Pick<SongRequestDto, "status" | "rejectReason">,
+): string {
+  const label = requestStatusLabel(request.status);
+  const reason = request.rejectReason?.trim();
+  return request.status === "rejected" && reason ? `${label} : ${reason}` : label;
 }
 
 /** "Album · 1905": the parts that exist, in that order. */
@@ -37,6 +53,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   request_limit: "Vous avez déjà 20 demandes en attente",
   request_duplicate: "Vous avez déjà demandé ce titre",
   request_not_found: "Cette demande n'existe plus",
+  request_not_pending: "Cette demande a déjà été traitée",
   proposal_expired: "Les propositions ont expiré, relancez la recherche",
 };
 

@@ -41,7 +41,7 @@ const wait = (ms: number, signal: AbortSignal) =>
 
 /** What a queue entry sends: a file with its target folder, or a URL for the server to fetch. */
 type Job =
-  | { kind: "file"; file: File; folderId: string | null }
+  | { kind: "file"; file: File; folderId: string | null; requestId: string | null }
   | { kind: "url"; url: string; folderId: string | null };
 
 const findChild = (tree: FolderNode[], parentId: string | null, name: string) => {
@@ -65,7 +65,10 @@ export interface ImportQueue {
   /** Nothing left to send or analyse. */
   idle: boolean;
   /** Files of the picker or a plain drop, all into folderId (null: the inbox). */
-  addFiles(files: File[], opts?: { folderId?: string | null }): void;
+  addFiles(
+    files: File[],
+    opts?: { folderId?: string | null; requestId?: string | null; requestTitle?: string },
+  ): void;
   /**
    * Files of a dropped or chosen folder: the folders missing under rootId are created first,
    * then each file is sent into its own folder.
@@ -162,7 +165,7 @@ export function useImportQueue(opts: {
                 (ratio) => {
                   if (!signal.aborted) dispatch({ type: "progress", key, ratio });
                 },
-                { signal, folderId: job.folderId },
+                { signal, folderId: job.folderId, requestId: job.kind === "file" ? job.requestId : null },
               );
         if (signal.aborted) return;
         dispatch({ type: "uploaded", key, importId });
@@ -191,15 +194,22 @@ export function useImportQueue(opts: {
   }, [state, transfer]);
 
   const enqueue = useCallback(
-    (list: { file: File; folderId: string | null }[]) => {
+    (
+      list: {
+        file: File;
+        folderId: string | null;
+        requestId?: string | null;
+        requestTitle?: string;
+      }[],
+    ) => {
       if (list.length === 0) return;
-      const added = list.map(({ file, folderId }) => {
+      const added = list.map(({ file, folderId, requestId = null, requestTitle }) => {
         nextKey.current += 1;
         const key = `import-${nextKey.current}`;
         if (maxUploadBytes === null || file.size <= maxUploadBytes) {
-          jobs.current.set(key, { kind: "file", file, folderId });
+          jobs.current.set(key, { kind: "file", file, folderId, requestId });
         }
-        return { key, filename: file.name, size: file.size };
+        return { key, filename: file.name, size: file.size, requestTitle };
       });
       dispatch({ type: "add", files: added, maxUploadBytes });
     },
@@ -207,9 +217,13 @@ export function useImportQueue(opts: {
   );
 
   const addFiles = useCallback(
-    (list: File[], addOpts: { folderId?: string | null } = {}) => {
+    (
+      list: File[],
+      addOpts: { folderId?: string | null; requestId?: string | null; requestTitle?: string } = {},
+    ) => {
       const folderId = addOpts.folderId ?? null;
-      enqueue(list.map((file) => ({ file, folderId })));
+      const { requestId, requestTitle } = addOpts;
+      enqueue(list.map((file) => ({ file, folderId, requestId, requestTitle })));
     },
     [enqueue],
   );

@@ -4,6 +4,7 @@ import {
   type LabelContext,
   type QueueState,
   entryLabel,
+  entryName,
   failureFromImport,
   importQueueReducer,
   initialQueueState,
@@ -220,5 +221,20 @@ describe("failureFromImport", () => {
       { maxUploadBytes: null, titleOf: (id) => (id === "t1" ? "Hey" : undefined) },
     );
     expect(label).toBe("Doublon de Hey");
+  });
+});
+
+describe("entryName", () => {
+  test("shows the requested title after the file name", () => {
+    const state = importQueueReducer(initialQueueState, {
+      type: "add",
+      files: [{ ...file("a"), requestTitle: "Gymnopédie" }],
+      maxUploadBytes: null,
+    });
+    expect(state.entries[0].requestTitle).toBe("Gymnopédie");
+    expect(entryName(state.entries[0])).toBe("a.flac → Gymnopédie");
+  });
+  test("plain file name without a request", () => {
+    expect(entryName({ filename: "a.flac" })).toBe("a.flac");
   });
 });

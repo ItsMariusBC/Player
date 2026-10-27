@@ -81,13 +81,13 @@ test("a user requests a song, the admin accepts then deletes it", async ({ page,
   const row = adminDialog.locator("[data-request-id]").filter({ hasText: title });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Valider" }).click();
-  await expect(row.getByText("Validée")).toBeVisible();
+  await expect(row.getByText("Acceptée")).toBeVisible();
 
   // The user sees it accepted.
   await page.reload();
   dialog = await openRequestDialog(page);
   mine = dialog.getByRole("listitem").filter({ hasText: title });
-  await expect(mine.getByText("Validée")).toBeVisible();
+  await expect(mine.getByText("Acceptée")).toBeVisible();
 
   // The admin deletes it.
   await row.getByRole("button", { name: "Supprimer" }).click();

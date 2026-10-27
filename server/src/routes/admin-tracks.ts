@@ -76,6 +76,27 @@ function parsePatch(body: Record<string, unknown> | null): TrackPatch | null {
   return patch;
 }
 
+const BATCH_MAX = 200;
+const BATCH_PATCH_KEYS = ["folderId", "artist", "album"] as const;
+
+/** 1..200 unique non-empty strings, else null. */
+function parseIds(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > BATCH_MAX) return null;
+  if (!value.every((id) => typeof id === "string" && id !== "")) return null;
+  const ids = value as string[];
+  return new Set(ids).size === ids.length ? ids : null;
+}
+
+function parseBatchPatch(value: unknown): TrackPatch | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  if (Object.keys(body).length === 0 || !onlyKeys(body, BATCH_PATCH_KEYS)) return null;
+  const patch = parsePatch(body);
+  // Unlike the unit PATCH, a batch refuses an empty artist (the album may be cleared).
+  if (patch && patch.artist === "") return null;
+  return patch;
+}
+
 export function adminTrackRoutes(
   deps: {
     db: DatabaseSync;
@@ -91,6 +112,99 @@ export function adminTrackRoutes(
   const withLock = deps.trackLocks ?? createTrackLocks();
   const routes = new Hono<AuthEnv>();
   routes.use("*", session, requireAdmin);
+
+  // Declared before the "/:id" routes so the literal paths are never captured as ids.
+  routes.post("/batch", async (c) => {
+    const body = await readJsonObject(c);
+    const ids = body && onlyKeys(body, ["ids", "patch"]) ? parseIds(body["ids"]) : null;
+    const patch = body ? parseBatchPatch(body["patch"]) : null;
+    if (!ids || !patch) {
+      return jsonError(
+        c,
+        400,
+        "bad_request",
+        "Expected { ids: 1..200 unique ids, patch: { folderId?, artist?, album? } }",
+      );
+    }
+    if (patch.folderId && !getFolder(db, patch.folderId)) {
+      return jsonError(c, 400, "bad_request", "Unknown folderId");
+    }
+    const updated: { id: string; tagsWritten: boolean }[] = [];
+    const missing: string[] = [];
+    const failed: string[] = [];
+    for (const id of ids) {
+      await withLock(id, async () => {
+        try {
+          const { tagsWritten } = await applyTrackPatch(deps, id, patch);
+          updated.push({ id, tagsWritten });
+        } catch (error) {
+          if (error instanceof TrackNotFound) {
+            missing.push(id);
+            return;
+          }
+          deps.log?.("track.batch_update_failed", { trackId: id, error: describe(error) });
+          failed.push(id);
+        }
+      });
+    }
+    if (updated.length > 0) {
+      recordAdminEvent(
+        db,
+        {
+          userId: c.get("user").id,
+          action: "track_batch_update",
+          detail: { count: updated.length, keys: Object.keys(patch) },
+        },
+        deps.now(),
+      );
+    }
+    return c.json({ updated, missing, failed });
+  });
+
+  routes.post("/batch-delete", async (c) => {
+    const body = await readJsonObject(c);
+    const ids = body && onlyKeys(body, ["ids"]) ? parseIds(body["ids"]) : null;
+    if (!ids) {
+      return jsonError(c, 400, "bad_request", "Expected { ids: 1..200 unique ids }");
+    }
+    const deleted: string[] = [];
+    const missing: string[] = [];
+    const failed: string[] = [];
+    for (const id of ids) {
+      await withLock(id, async () => {
+        if (!readyTrack(db, id)) {
+          missing.push(id);
+          return;
+        }
+        try {
+          deleteTrack(db, id);
+        } catch (error) {
+          deps.log?.("track.batch_delete_failed", { trackId: id, error: describe(error) });
+          failed.push(id);
+          return;
+        }
+        deleted.push(id);
+        // The row is gone first: the media route answers 404 even if the removal fails midway.
+        try {
+          await storage.removeTrack(id);
+        } catch (error) {
+          deps.log?.("track.remove_failed", { trackId: id, error: describe(error) });
+        }
+      });
+    }
+    if (deleted.length > 0) {
+      recordAdminEvent(
+        db,
+        {
+          userId: c.get("user").id,
+          action: "track_batch_delete",
+          detail: { count: deleted.length },
+        },
+        deps.now(),
+      );
+    }
+    return c.json({ deleted, missing, failed });
+  });
 
   routes.patch("/:id", async (c) => {
     const id = c.req.param("id");

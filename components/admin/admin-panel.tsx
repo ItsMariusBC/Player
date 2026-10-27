@@ -4,10 +4,11 @@
 // centre with the import drop zone below them, the tag editor on the right, the metadata
 // dialog above. Every mutation goes through lib/admin-api, then reloads the admin catalogue
 // and the player's one; a failure shows in the banner.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { m } from "framer-motion";
 import { PanelButton } from "@/components/visualizer-panel";
 import { buttonVariants } from "@/components/ui/button";
+import { BatchBar } from "@/components/admin/batch-bar";
 import { ContextMenu, type MenuItem } from "@/components/admin/context-menu";
 import { FolderTree } from "@/components/admin/folder-tree";
 import { RequestList } from "@/components/admin/request-list";
@@ -16,9 +17,11 @@ import { TrackEditor } from "@/components/admin/track-editor";
 import { LoudnessStatus } from "@/components/admin/loudness-status";
 import { TrackTable } from "@/components/admin/track-table";
 import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
+import type { CollectResult, DroppedFile } from "@/lib/drop-entries";
 import * as adminApi from "@/lib/admin-api";
 import {
   INBOX_LABEL,
+  batchResultLabel,
   buildFolderPathLabel,
   countFolderItems,
   findFolder,
@@ -51,10 +54,11 @@ export interface AdminPanelProps {
 }
 
 export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
-  const [banner, setBanner] = useState<string | null>(null);
+  // Errors and batch results share one dismissible banner; only the styling differs.
+  const [banner, setBanner] = useState<{ text: string; tone: "error" | "notice" } | null>(null);
   const showError = useCallback((error: unknown) => {
     console.error("Admin action failed", error);
-    setBanner(errorMessage(error));
+    setBanner({ text: errorMessage(error), tone: "error" });
   }, []);
   const { catalog, refreshAdmin } = useAdminCatalog(showError);
   const { requests, pending, refresh: refreshRequests } = useAdminRequests(showError);
@@ -64,6 +68,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  // Tracks ticked for a batch action; emptied when the displayed folder changes.
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set());
+  const lastToggled = useRef<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   // Runs in flight (a drag-move may overlap a save): the editor is disabled while any is.
@@ -81,6 +88,10 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   const folderId =
     selectedFolderId !== null && findFolder(folders, selectedFolderId) ? selectedFolderId : null;
   const visibleTracks = tracksInFolder(folders, tracks, folderId);
+  const selectedIds = useMemo(
+    () => new Set(visibleTracks.filter((track) => ticked.has(track.id)).map((track) => track.id)),
+    [visibleTracks, ticked],
+  );
   const selectedTrack = tracks.find((track) => track.id === selectedTrackId);
   const metadataTrack = tracks.find((track) => track.id === metadataTrackId);
 
@@ -108,7 +119,26 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   const onImported = useCallback(() => {
     Promise.all([refreshAdmin(), onCatalogChanged()]).catch(showError);
   }, [refreshAdmin, onCatalogChanged, showError]);
-  const imports = useImportQueue({ maxUploadBytes, onReady: onImported });
+  const getFolders = useCallback(() => folders, [folders]);
+  const imports = useImportQueue({
+    maxUploadBytes,
+    onReady: onImported,
+    getFolders,
+    onError: showError,
+  });
+
+  useEffect(() => {
+    setTicked(new Set());
+    lastToggled.current = null;
+  }, [folderId]);
+
+  const onFolderFiles = (result: CollectResult) => {
+    if (result.tooMany) {
+      showError(new Error("Trop de fichiers (500 max)"));
+      return;
+    }
+    void imports.addEntries(result.files as DroppedFile<File>[], folderId);
+  };
 
   // A file dropped beside the zone must not replace the app with the audio file.
   useEffect(() => {
@@ -186,6 +216,63 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     if (view === "requests") void refreshRequests();
   }, [view, refreshRequests]);
 
+  const toggleTrack = (id: string, shiftKey: boolean) => {
+    const next = new Set(selectedIds);
+    const from = lastToggled.current;
+    const fromIndex = from === null ? -1 : visibleTracks.findIndex((t) => t.id === from);
+    const toIndex = visibleTracks.findIndex((t) => t.id === id);
+    if (shiftKey && fromIndex >= 0 && toIndex >= 0) {
+      // The range takes the state of the box that was just clicked.
+      const on = !selectedIds.has(id);
+      const [lo, hi] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+      for (const track of visibleTracks.slice(lo, hi + 1)) {
+        if (on) next.add(track.id);
+        else next.delete(track.id);
+      }
+    } else if (next.has(id)) next.delete(id);
+    else next.add(id);
+    lastToggled.current = id;
+    setTicked(next);
+  };
+
+  const toggleAll = () => {
+    lastToggled.current = null;
+    setTicked(
+      selectedIds.size === visibleTracks.length
+        ? new Set()
+        : new Set(visibleTracks.map((track) => track.id)),
+    );
+  };
+
+  const clearSelection = () => {
+    setTicked(new Set());
+    lastToggled.current = null;
+  };
+
+  const batchUpdate = async (patch: adminApi.BatchTrackPatch) => {
+    const ok = await run(async () => {
+      const result = await adminApi.batchUpdateTracks([...selectedIds], patch);
+      setBanner({
+        text: batchResultLabel({ updated: result.updated.length, missing: result.missing.length }),
+        tone: "notice",
+      });
+    });
+    if (ok) clearSelection();
+    return ok;
+  };
+
+  const batchDelete = async () => {
+    const ok = await run(async () => {
+      const result = await adminApi.batchDeleteTracks([...selectedIds]);
+      setSelectedTrackId((current) => (current !== null && result.deleted.includes(current) ? null : current));
+      setBanner({
+        text: batchResultLabel({ deleted: result.deleted.length, missing: result.missing.length }),
+        tone: "notice",
+      });
+    });
+    if (ok) clearSelection();
+  };
+
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const moveTrack = (trackId: string, target: string | null) => {
@@ -212,7 +299,10 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     setMetadataTrackId(null);
     setLastSave({ trackId, tagsWritten: result.tagsWritten });
     if (result.coverError) {
-      setBanner("Tags appliqués, mais la pochette proposée a été refusée");
+      setBanner({
+        text: "Tags appliqués, mais la pochette proposée a été refusée",
+        tone: "error",
+      });
     }
     setInFlight((n) => n + 1);
     Promise.all([refreshAdmin(), onCatalogChanged()])
@@ -461,14 +551,24 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
 
       {banner && (
         <div
-          role="alert"
-          className="mt-4 flex items-start justify-between gap-3 rounded-md border border-red-300/20 bg-red-950/30 px-3 py-2 text-sm text-red-100"
+          role={banner.tone === "error" ? "alert" : "status"}
+          className={cn(
+            "mt-4 flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm",
+            banner.tone === "error"
+              ? "border-red-300/20 bg-red-950/30 text-red-100"
+              : "border-purple-200/20 bg-purple-100/10 text-purple-50",
+          )}
         >
-          <span className="min-w-0 break-words">{banner}</span>
+          <span className="min-w-0 break-words">{banner.text}</span>
           <button
             type="button"
             aria-label="Masquer le message"
-            className="shrink-0 rounded-sm text-red-100/70 transition-colors hover:text-red-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-300/60"
+            className={cn(
+              "shrink-0 rounded-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2",
+              banner.tone === "error"
+                ? "text-red-100/70 hover:text-red-50 focus-visible:ring-red-300/60"
+                : "text-purple-100/70 hover:text-purple-50 focus-visible:ring-purple-300/60",
+            )}
             onClick={() => setBanner(null)}
           >
             <CloseIcon />
@@ -523,10 +623,24 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
           className="flex min-w-0 flex-1 flex-col gap-4 md:overflow-hidden"
         >
           <div className="min-h-0 flex-1 md:overflow-y-auto">
+            {selectedIds.size > 0 && (
+              <BatchBar
+                count={selectedIds.size}
+                folders={folders}
+                busy={inFlight > 0}
+                onMove={(target) => void batchUpdate({ folderId: target })}
+                onApply={(field, value) => batchUpdate({ [field]: value })}
+                onDelete={() => void batchDelete()}
+                onClear={clearSelection}
+              />
+            )}
             <TrackTable
               tracks={visibleTracks}
               selectedId={selectedTrack?.id ?? null}
+              selectedIds={selectedIds}
               onSelect={selectTrack}
+              onToggle={toggleTrack}
+              onToggleAll={toggleAll}
               onTrackMenu={(id, x, y) => setMenu({ kind: "track", id, x, y, step: "main" })}
             />
           </div>
@@ -543,7 +657,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
                   titleOf: (id) => tracks.find((track) => track.id === id)?.title,
                 })
               }
-              onFiles={imports.addFiles}
+              onFiles={(files) => imports.addFiles(files, { folderId })}
+              onFolder={onFolderFiles}
+              onUrl={(url) => imports.addUrl(url, folderId)}
               onShow={(trackId) => {
                 selectFolder(null);
                 selectTrack(trackId);

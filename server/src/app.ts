@@ -9,6 +9,8 @@ import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts"
 import { createTrackLocks } from "./admin/track-edit.ts";
 import type { MetadataSearch } from "./metadata/search.ts";
 import { addMetadataApplyRoute, adminMetadataRoutes } from "./routes/admin-metadata.ts";
+import { adminRequestRoutes } from "./routes/admin-requests.ts";
+import { requestRoutes } from "./routes/requests.ts";
 import { adminTrackRoutes } from "./routes/admin-tracks.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
@@ -89,6 +91,9 @@ export function createApp(deps: AppDeps) {
     app.route("/api/admin/metadata", adminMetadataRoutes({ metadata: deps.metadata }, session));
   }
   app.route("/api/admin/tracks", trackRoutes);
+
+  app.route("/api/requests", requestRoutes({ ...deps, now }, session));
+  app.route("/api/admin/requests", adminRequestRoutes({ ...deps, now }, session));
 
   deps.mount?.(app, session);
 

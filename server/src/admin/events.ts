@@ -7,7 +7,9 @@ export type AdminAction =
   | "track_update"
   | "track_delete"
   | "cover_replace"
-  | "metadata_apply";
+  | "metadata_apply"
+  | "request_accept"
+  | "request_delete";
 
 /** One audit row per admin mutation; detail must never carry a secret. */
 export function recordAdminEvent(

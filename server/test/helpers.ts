@@ -19,6 +19,8 @@ export interface TestAppOptions {
   staticDir?: string;
   env?: Record<string, string>;
   mount?: AppDeps["mount"];
+  /** Leaves `metadata` out of the app deps, as when no provider is configured. */
+  withoutMetadata?: boolean;
   /** Metadata providers and the cover guard's fetch/resolve; nothing reaches the network. */
   metadata?: {
     providers?: MetadataProvider[];
@@ -86,7 +88,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     sleep: opts.metadata?.sleep ?? (async (ms) => advance(ms)),
   });
   const app = createApp({
-    metadata,
+    metadata: opts.withoutMetadata ? undefined : metadata,
     config,
     db,
     oidc,

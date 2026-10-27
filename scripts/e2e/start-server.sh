@@ -27,4 +27,8 @@ until curl -fs -o /dev/null "$url"; do
 done
 
 rm -rf "$data_dir"
+node --no-warnings=ExperimentalWarning dist/server/migrate-catalog.js tests/e2e/fixtures --manifest tests/e2e/fixtures/manifest.json || {
+  echo "Catalogue seeding failed" >&2
+  exit 1
+}
 exec node --no-warnings=ExperimentalWarning dist/server/main.js

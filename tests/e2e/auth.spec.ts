@@ -1,12 +1,11 @@
 import { expect, test } from "@playwright/test";
-import songs from "../../music/data.json" with { type: "json" };
 import { loginAs, logoutViaButton } from "./auth.helpers";
 
 test("user sees the player and the logout button", async ({ page }) => {
   await loginAs(page, "user@test");
 
   await expect(page.getByRole("main")).toBeVisible();
-  await expect(page.getByText(songs[0].name, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Fixture One", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
 });
 

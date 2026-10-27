@@ -12,7 +12,6 @@
     "migrate:catalog": "node --no-warnings=ExperimentalWarning server/src/migrate-catalog.ts",
     "start": "node --no-warnings=ExperimentalWarning dist/server/main.js",
     "preview": "vite preview",
-    "generate:music": "node music/generate.mjs",
     "lint": "oxlint --deny-warnings .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

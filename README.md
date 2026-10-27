@@ -21,7 +21,15 @@ yarn playwright install chromium
 yarn test:e2e
 ```
 
-`yarn validate` exécute lint, format des fichiers d’outillage, types, tests unitaires et build. Les tests navigateur utilisent le build `dist/`. `yarn generate:music` régénère le catalogue à partir de `public/` et peut modifier les pochettes.
+`yarn validate` exécute lint, format des fichiers d’outillage, types, tests unitaires et build. Les tests navigateur utilisent le build `dist/`.
+
+Le catalogue vit dans le dossier de données de l'API (`DATA_DIR`) et n'est plus versionné. Pour remplir le dossier de données de développement avec des fichiers audio existants :
+
+```sh
+DATA_DIR=./.data yarn migrate:catalog <dossier-de-musique> [--manifest <fichier.json>]
+```
+
+Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`.
 
 ## Branches et livraison
 

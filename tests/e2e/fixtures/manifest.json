@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Fixture One",
+    "author": "Fixture Artist",
+    "url": "/fixture-one.wav",
+    "folder": "Fixtures"
+  },
+  { "name": "Fixture Two", "author": "Fixture Artist", "url": "/fixture-two.wav" }
+]

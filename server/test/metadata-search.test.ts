@@ -155,7 +155,38 @@ describe("metadata providers", () => {
     assert.deepEqual(await mb!.search('AC/DC: "Back" (live)', signal), []);
     assert.equal(calls[0]!.url.searchParams.get("query"), 'AC\\/DC\\: \\"Back\\" \\(live\\)');
     await assert.rejects(dz!.search("x y", signal));
-    await assert.rejects(it!.search("x y", signal));
+    await assert.rejects(it!.search("x y", signal), /HTTP 503/);
+    for (const call of calls) assert.equal(new Headers(call.headers).get("user-agent"), UA);
+  });
+
+  it("refuse redirects and fail on a body over 1 MiB", async () => {
+    const inits: RequestInit[] = [];
+    const huge = JSON.stringify({ data: [], pad: "x".repeat(1024 * 1024) });
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      inits.push(init ?? {});
+      const host = new URL(String(input)).hostname;
+      if (host === "api.deezer.com") return new Response(huge, { status: 200 });
+      return Response.json(ITUNES);
+    }) as typeof globalThis.fetch;
+    const log: { event: string; data?: Record<string, unknown> }[] = [];
+    const search = createMetadataSearch({
+      now: () => new Date("2026-10-27T10:00:00Z"),
+      log: (event, data) => log.push({ event, data }),
+      providers: createProviders({ fetch, userAgent: UA }).slice(1),
+    });
+    const result = await search.search("clair de lune");
+    assert.equal(result.partial, true);
+    assert.deepEqual(
+      result.proposals.map((x) => x.source),
+      ["itunes"],
+    );
+    for (const init of inits) assert.equal(init.redirect, "error");
+    assert.deepEqual(log, [
+      {
+        event: "metadata.provider_failed",
+        data: { provider: "deezer", error: "BodyTooLarge", message: "body over 1048576 bytes" },
+      },
+    ]);
   });
 });
 
@@ -258,14 +289,15 @@ describe("createMetadataSearch", () => {
     assert.equal((await search.search("first")).partial, false);
     c.advance(999);
     const second = await search.search("second");
-    assert.equal(second.partial, true);
-    assert.deepEqual(second.proposals, []);
+    // Every provider skipped: nothing was asked, the caller should retry shortly.
+    assert.deepEqual(second, { proposals: [], partial: true, skipped: true });
     assert.equal(mb.calls, 1);
     assert.equal(dz.calls, 1);
 
     c.advance(1);
     const third = await search.search("third");
     assert.equal(third.partial, false);
+    assert.equal("skipped" in third, false);
     assert.equal(third.proposals.length, 2);
     assert.equal(mb.calls, 2);
     assert.equal(dz.calls, 2);
@@ -273,10 +305,10 @@ describe("createMetadataSearch", () => {
 
   it("marks a failed provider as partial and throws when every provider failed", async () => {
     const c = clock();
-    const log: string[] = [];
+    const log: { event: string; data?: Record<string, unknown> }[] = [];
     const ok = createMetadataSearch({
       now: c.now,
-      log: (event) => log.push(event),
+      log: (event, data) => log.push({ event, data }),
       providers: [
         fakeProvider("musicbrainz", new Error("down")),
         fakeProvider("deezer", [p("deezer", "C", "D", null)]),
@@ -284,8 +316,14 @@ describe("createMetadataSearch", () => {
     });
     const result = await ok.search("query");
     assert.equal(result.partial, true);
+    assert.equal("skipped" in result, false);
     assert.equal(result.proposals.length, 1);
-    assert.deepEqual(log, ["metadata.provider_failed"]);
+    assert.deepEqual(log, [
+      {
+        event: "metadata.provider_failed",
+        data: { provider: "musicbrainz", error: "Error", message: "down" },
+      },
+    ]);
 
     const down = createMetadataSearch({
       now: c.now,
@@ -295,6 +333,24 @@ describe("createMetadataSearch", () => {
       ],
     });
     await assert.rejects(down.search("query"), MetadataUnavailable);
+  });
+
+  it("logs the HTTP status of a failed provider, never its body", async () => {
+    const fetch = (async () =>
+      new Response("secret body", { status: 503 })) as unknown as typeof globalThis.fetch;
+    const log: { event: string; data?: Record<string, unknown> }[] = [];
+    const search = createMetadataSearch({
+      now: clock().now,
+      log: (event, data) => log.push({ event, data }),
+      providers: createProviders({ fetch, userAgent: UA }).slice(2),
+    });
+    await assert.rejects(search.search("query"), MetadataUnavailable);
+    assert.deepEqual(log, [
+      {
+        event: "metadata.provider_failed",
+        data: { provider: "itunes", error: "ProviderHttpError", message: "HTTP 503", status: 503 },
+      },
+    ]);
   });
 
   it("keeps proposals for 15 minutes", async () => {

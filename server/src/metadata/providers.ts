@@ -1,11 +1,23 @@
 // Free, keyless metadata providers, queried in this order: MusicBrainz (recording search,
 // covers from the Cover Art Archive), Deezer (public search, 500 px covers), iTunes Search.
-import { COVER_HOSTS, hostAllowed } from "./fetch-guard.ts";
+import { COVER_HOSTS, hostAllowed, readLimited } from "./fetch-guard.ts";
 import type { MetadataProvider, Proposal, ProposalInput } from "./search.ts";
 
 export type ProviderName = Proposal["source"];
 
 const LIMIT = 10;
+/** Ten results never come near it; a larger answer is refused rather than parsed. */
+export const MAX_PROVIDER_BYTES = 1024 * 1024;
+
+/** A non-2xx answer; only the status is kept, never the body. */
+export class ProviderHttpError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = "ProviderHttpError";
+    this.status = status;
+  }
+}
 
 interface ProviderDeps {
   fetch: typeof globalThis.fetch;
@@ -41,13 +53,15 @@ const records = (value: unknown): Record<string, unknown>[] =>
 async function getJson(deps: ProviderDeps, url: URL, signal: AbortSignal): Promise<unknown> {
   const res = await deps.fetch(url, {
     signal,
+    redirect: "error",
     headers: { "user-agent": deps.userAgent, accept: "application/json" },
   });
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
-    throw new Error(`HTTP ${res.status}`);
+    throw new ProviderHttpError(res.status);
   }
-  return res.json();
+  const body = await readLimited(res, MAX_PROVIDER_BYTES);
+  return JSON.parse(body.toString("utf8"));
 }
 
 function proposal(

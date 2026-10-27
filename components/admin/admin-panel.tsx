@@ -360,7 +360,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       role="dialog"
       aria-modal="true"
       aria-label="Administration"
-      className="fixed inset-4 flex flex-col overflow-hidden rounded-2xl border border-purple-100/10 bg-purple-950/25 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] md:inset-8 md:p-6"
+      data-admin-panel=""
+      tabIndex={-1}
+      className="fixed inset-4 flex flex-col focus:outline-hidden overflow-hidden rounded-2xl border border-purple-100/10 bg-purple-950/25 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] md:inset-8 md:p-6"
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}

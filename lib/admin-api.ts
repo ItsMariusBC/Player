@@ -48,6 +48,8 @@ export interface MetadataSearchResult {
   proposals: Proposal[];
   /** A provider was skipped (rate limit) or did not answer. */
   partial: boolean;
+  /** Every provider was skipped by the rate limit: nothing was searched, retry shortly. */
+  skipped?: true;
 }
 
 export interface MetadataApplyResult extends TrackUpdateResult {

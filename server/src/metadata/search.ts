@@ -27,6 +27,8 @@ export interface SearchResult {
   proposals: Proposal[];
   /** True when a provider was skipped (rate limit) or failed. */
   partial: boolean;
+  /** Present (true) only when every provider was skipped by the rate limit: retry shortly. */
+  skipped?: true;
 }
 
 export interface MetadataSearch {
@@ -65,6 +67,17 @@ export function dedupeProposals(inputs: ProposalInput[]): ProposalInput[] {
     kept.year ??= input.year;
   }
   return [...byKey.values()];
+}
+
+/** Name, message and HTTP status of a provider failure; a response body is never logged. */
+function describeFailure(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { error: "unknown" };
+  const status = (error as { status?: unknown }).status;
+  return {
+    error: error.name,
+    message: error.message,
+    ...(typeof status === "number" ? { status } : {}),
+  };
 }
 
 export function createMetadataSearch(deps: {
@@ -113,13 +126,16 @@ export function createMetadataSearch(deps: {
         } catch (error) {
           deps.log?.("metadata.provider_failed", {
             provider: provider.name,
-            error: error instanceof Error ? error.name : "unknown",
+            ...describeFailure(error),
           });
           return { skipped: false, failed: true, results: [] as ProposalInput[] };
         }
       });
       const outcomes = await Promise.all(attempts);
       if (outcomes.length > 0 && outcomes.every((o) => o.failed)) throw new MetadataUnavailable();
+      if (outcomes.length > 0 && outcomes.every((o) => o.skipped)) {
+        return { proposals: [], partial: true, skipped: true };
+      }
       const partial = outcomes.some((o) => o.skipped || o.failed);
       const now = deps.now().getTime();
       prune(now);

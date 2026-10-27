@@ -1,7 +1,7 @@
 // lib/admin-format.ts
 // Pure helpers of the admin panel (folder labels, track order, durations). No React here,
 // so the Bun unit tests import them directly.
-import type { Proposal } from "@/lib/admin-api";
+import type { MetadataSearchResult, Proposal } from "@/lib/admin-api";
 import { folderAncestors, type FolderNode, type TrackDto } from "@/lib/catalog";
 
 export const INBOX_LABEL = "Boîte d'arrivée";
@@ -134,4 +134,31 @@ export function proposalDetails(proposal: Proposal): string {
   return [proposal.album, proposal.year?.toString(), PROPOSAL_SOURCE_LABELS[proposal.source]]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
+}
+
+/** Delay before « Rechercher » can run again: the server allows one request per second per provider. */
+export const METADATA_SEARCH_COOLDOWN_MS = 1000;
+
+export interface MetadataResults {
+  proposals: Proposal[];
+  partial: boolean;
+  /** The search was not run (rate limit): the previous proposals stay on screen. */
+  retry: boolean;
+}
+
+/** What the dialog lists after a search answered. */
+export function nextMetadataResults(
+  previous: readonly Proposal[],
+  result: MetadataSearchResult,
+): MetadataResults {
+  if (result.skipped) return { proposals: [...previous], partial: false, retry: true };
+  return { proposals: result.proposals, partial: result.partial, retry: false };
+}
+
+/** The status line under the list, or null when the list speaks for itself. */
+export function metadataResultsNotice(results: MetadataResults): string | null {
+  if (results.retry) return "Réessayez dans un instant";
+  if (results.proposals.length === 0) return "Aucune proposition";
+  if (results.partial) return "Certains fournisseurs n'ont pas répondu";
+  return null;
 }

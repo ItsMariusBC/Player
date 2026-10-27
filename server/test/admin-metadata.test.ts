@@ -144,7 +144,7 @@ describe("GET /api/admin/metadata/search", () => {
     const cookie = t.loginAs("admin");
     await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
     const again = await call(cookie, "GET", "/api/admin/metadata/search?q=clair");
-    assert.deepEqual(await again.json(), { proposals: [], partial: true });
+    assert.deepEqual(await again.json(), { proposals: [], partial: true, skipped: true });
     t.advance(1000);
     const later = (await (
       await call(cookie, "GET", "/api/admin/metadata/search?q=clair")
@@ -254,6 +254,31 @@ describe("POST /api/admin/tracks/:id/metadata", () => {
     assert.equal(getTrack(t.db, id)!.coverExt, null);
     assert.deepEqual(readdirSync(path.join(t.tempDir, "media", id)), ["original.mp3"]);
     assert.ok(t.log.some((entry) => entry.event === "metadata.cover_rejected"));
+  });
+
+  it("answers 422 cover_rejected, never 500, when storing the cover fails after the text", async () => {
+    setup();
+    const cookie = t.loginAs("admin");
+    const id = await importMp3(cookie);
+    const proposalId = await searchFirst(cookie);
+    t.storage.replaceCover = async () => {
+      throw new Error("disk full");
+    };
+    const res = await call(cookie, "POST", `/api/admin/tracks/${id}/metadata`, {
+      proposalId,
+      applyCover: true,
+    });
+    assert.equal(res.status, 422);
+    const body = (await res.json()) as any;
+    assert.equal(body.error.code, "cover_rejected");
+    assert.equal(body.coverApplied, false);
+    assert.equal(body.coverError, "cover_rejected");
+    assert.equal(body.track.title, "Clair de lune");
+    assert.equal(body.track.hasCover, false);
+    assert.equal(getTrack(t.db, id)!.title, "Clair de lune");
+    assert.deepEqual(readdirSync(path.join(t.tempDir, "media", id)), ["original.mp3"]);
+    const failed = t.log.find((entry) => entry.event === "metadata.cover_failed");
+    assert.deepEqual(failed?.data, { trackId: id, error: "Error", message: "disk full" });
   });
 
   it("answers 404 proposal_expired for an unknown or expired proposal", async () => {

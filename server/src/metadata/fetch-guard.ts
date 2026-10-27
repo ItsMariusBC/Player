@@ -4,7 +4,7 @@
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { lookup as dnsLookupAsync } from "node:dns/promises";
 import { request } from "node:https";
-import { isIPv4, isIPv6, type LookupFunction } from "node:net";
+import { isIP, isIPv4, isIPv6, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
 import { sniffImage } from "../media/image.ts";
 import type { CoverExt } from "../media/storage.ts";
@@ -127,19 +127,25 @@ export function isPublicAddress(ip: string): boolean {
   return true;
 }
 
-/** dns.lookup that fails when any address of the host is not public: the socket is pinned. */
-const checkedLookup: LookupFunction = (hostname, options, callback) => {
-  dnsLookup(hostname, { ...options, all: true }, (error, addresses) => {
-    if (error) return callback(error, "", 0);
-    const list = addresses as unknown as LookupAddress[];
-    const first = list[0];
-    if (!first || list.some((entry) => !isPublicAddress(entry.address))) {
-      return callback(new Error("refused address"), "", 0);
-    }
-    if (options.all) return (callback as (e: null, a: LookupAddress[]) => void)(null, list);
-    return callback(null, first.address, first.family);
-  });
-};
+/**
+ * A dns.lookup that fails when any address of the host is not public, in both the single
+ * and the `all` mode: the socket can only connect to an address that passed the check.
+ */
+export function createCheckedLookup(lookupImpl: typeof dnsLookup = dnsLookup): LookupFunction {
+  return (hostname, options, callback) =>
+    lookupImpl(hostname, { ...options, all: true }, (error, addresses) => {
+      if (error) return callback(error, "", 0);
+      const list = addresses as unknown as LookupAddress[];
+      const first = list[0];
+      if (!first || list.some((entry) => !isPublicAddress(entry.address))) {
+        return callback(new Error("refused address"), "", 0);
+      }
+      if (options.all) return (callback as (e: null, a: LookupAddress[]) => void)(null, list);
+      return callback(null, first.address, first.family);
+    });
+}
+
+const checkedLookup = createCheckedLookup();
 
 /**
  * A minimal fetch over node:https whose connection goes through checkedLookup, so a DNS
@@ -148,6 +154,11 @@ const checkedLookup: LookupFunction = (hostname, options, callback) => {
 export const pinnedFetch = ((input: string | URL | Request, init?: RequestInit) =>
   new Promise<Response>((resolve, reject) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
+    // Node never calls lookup for an IP literal, so it would skip the address check.
+    if (isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0) {
+      reject(new Error("IP-literal host refused"));
+      return;
+    }
     const req = request(
       url,
       {
@@ -195,30 +206,36 @@ async function checkTarget(url: URL, opts: GuardOptions): Promise<void> {
   }
 }
 
-async function readLimited(res: Response, maxBytes: number): Promise<Buffer> {
+export class BodyTooLarge extends Error {
+  constructor(maxBytes: number) {
+    super(`body over ${maxBytes} bytes`);
+    this.name = "BodyTooLarge";
+  }
+}
+
+/**
+ * Reads a body up to maxBytes: refused on an announced content-length over the limit, and
+ * cancelled while streaming once it passes it (BodyTooLarge). Read errors are rethrown.
+ */
+export async function readLimited(res: Response, maxBytes: number): Promise<Buffer> {
   const announced = Number(res.headers.get("content-length"));
   if (Number.isFinite(announced) && announced > maxBytes) {
     await res.body?.cancel().catch(() => {});
-    throw new CoverRejected("too_large");
+    throw new BodyTooLarge(maxBytes);
   }
   if (!res.body) return Buffer.alloc(0);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => {});
-        throw new CoverRejected("too_large");
-      }
-      chunks.push(value);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new BodyTooLarge(maxBytes);
     }
-  } catch (error) {
-    if (error instanceof CoverRejected) throw error;
-    throw new CoverRejected("fetch_failed");
+    chunks.push(value);
   }
   return Buffer.concat(chunks);
 }
@@ -261,7 +278,12 @@ export async function guardedFetchImage(
       await res.body?.cancel().catch(() => {});
       throw new CoverRejected("bad_status");
     }
-    const data = await readLimited(res, opts.maxBytes);
+    let data: Buffer;
+    try {
+      data = await readLimited(res, opts.maxBytes);
+    } catch (error) {
+      throw new CoverRejected(error instanceof BodyTooLarge ? "too_large" : "fetch_failed");
+    }
     const ext = sniffImage(data);
     if (!ext) throw new CoverRejected("not_an_image");
     return { data, ext };

@@ -56,6 +56,7 @@ export function TrackTable({
           return (
             <tr
               key={track.id}
+              data-track-id={track.id}
               tabIndex={0}
               draggable
               aria-current={selected ? "true" : undefined}

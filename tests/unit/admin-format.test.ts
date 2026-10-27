@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  metadataResultsNotice,
+  nextMetadataResults,
   isMetadataQueryValid,
   metadataQuery,
   proposalDetails,
@@ -146,5 +148,50 @@ describe("metadata dialog helpers", () => {
     expect(proposalDetails({ ...base, source: "musicbrainz", album: null, year: null })).toBe(
       "MusicBrainz",
     );
+  });
+});
+
+describe("metadata results state", () => {
+  const proposal = (id: string) => ({
+    id,
+    source: "deezer" as const,
+    title: "T",
+    artist: "A",
+    album: null,
+    year: null,
+    coverUrl: null,
+  });
+
+  test("a skipped search keeps the previous proposals and asks to retry", () => {
+    const previous = [proposal("a")];
+    const results = nextMetadataResults(previous, { proposals: [], partial: true, skipped: true });
+    expect(results).toEqual({ proposals: previous, partial: false, retry: true });
+    expect(metadataResultsNotice(results)).toBe("Réessayez dans un instant");
+    expect(
+      metadataResultsNotice(
+        nextMetadataResults([], { proposals: [], partial: true, skipped: true }),
+      ),
+    ).toBe("Réessayez dans un instant");
+  });
+
+  test("an answered search replaces the list", () => {
+    const fresh = [proposal("b")];
+    expect(nextMetadataResults([proposal("a")], { proposals: fresh, partial: false })).toEqual({
+      proposals: fresh,
+      partial: false,
+      retry: false,
+    });
+  });
+
+  test("the notice says empty, partial or nothing", () => {
+    expect(metadataResultsNotice({ proposals: [], partial: true, retry: false })).toBe(
+      "Aucune proposition",
+    );
+    expect(metadataResultsNotice({ proposals: [proposal("a")], partial: true, retry: false })).toBe(
+      "Certains fournisseurs n'ont pas répondu",
+    );
+    expect(
+      metadataResultsNotice({ proposals: [proposal("a")], partial: false, retry: false }),
+    ).toBe(null);
   });
 });

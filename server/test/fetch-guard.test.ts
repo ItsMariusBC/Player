@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { LookupAddress } from "node:dns";
 import {
   COVER_HOSTS,
   CoverRejected,
+  createCheckedLookup,
   guardedFetchImage,
   hostAllowed,
   isPublicAddress,
+  pinnedFetch,
 } from "../src/metadata/fetch-guard.ts";
 import { imageBytes } from "./fixtures.ts";
 
@@ -278,5 +281,55 @@ describe("hostAllowed", () => {
     assert.equal(hostAllowed("evilarchive.org", COVER_HOSTS), false);
     assert.equal(hostAllowed("coverartarchive.org.evil.example", COVER_HOSTS), false);
     assert.equal(hostAllowed("x.dzcdn.net", COVER_HOSTS), false);
+  });
+});
+
+describe("pinnedFetch lookup", () => {
+  /** A dns.lookup stub answering every host with the given addresses. */
+  const stubDns = (addresses: string[]) =>
+    ((_host: string, _options: unknown, callback: (e: null, a: LookupAddress[]) => void) =>
+      callback(
+        null,
+        addresses.map((address) => ({ address, family: address.includes(":") ? 6 : 4 })),
+      )) as unknown as Parameters<typeof createCheckedLookup>[0];
+
+  function lookup(addresses: string[], all: boolean) {
+    const checked = createCheckedLookup(stubDns(addresses));
+    return new Promise<{ error: Error | null; result: unknown }>((resolve) => {
+      checked("cdn-images.dzcdn.net", { all }, ((
+        error: Error | null,
+        address: unknown,
+        family?: unknown,
+      ) => resolve({ error, result: all ? address : { address, family } })) as never);
+    });
+  }
+
+  it("refuses a mixed public and private answer in both lookup modes", async () => {
+    for (const all of [true, false]) {
+      const { error } = await lookup(["93.184.216.34", "10.0.0.1"], all);
+      assert.ok(error, `all=${all}`);
+    }
+  });
+
+  it("passes a public answer through in both lookup modes", async () => {
+    const many = await lookup(["93.184.216.34", "2606:4700:4700::1111"], true);
+    assert.equal(many.error, null);
+    assert.deepEqual(
+      (many.result as LookupAddress[]).map((entry) => entry.address),
+      ["93.184.216.34", "2606:4700:4700::1111"],
+    );
+    const one = await lookup(["93.184.216.34"], false);
+    assert.equal(one.error, null);
+    assert.deepEqual(one.result, { address: "93.184.216.34", family: 4 });
+  });
+
+  it("refuses IP-literal hosts before any request", async () => {
+    for (const url of [
+      "https://127.0.0.1/x.jpg",
+      "https://[::1]/x.jpg",
+      "https://93.184.216.34/x",
+    ]) {
+      await assert.rejects(pinnedFetch(url), /IP-literal/, url);
+    }
   });
 });

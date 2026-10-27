@@ -9,16 +9,20 @@ import { inputClass } from "@/components/admin/folder-tree";
 import { buttonVariants } from "@/components/ui/button";
 import * as adminApi from "@/lib/admin-api";
 import type { MetadataApplyResult, Proposal } from "@/lib/admin-api";
-import { isMetadataQueryValid, metadataQuery, proposalDetails } from "@/lib/admin-format";
+import {
+  METADATA_SEARCH_COOLDOWN_MS,
+  isMetadataQueryValid,
+  metadataQuery,
+  metadataResultsNotice,
+  nextMetadataResults,
+  proposalDetails,
+  type MetadataResults,
+} from "@/lib/admin-format";
 import { ApiError } from "@/lib/api";
 import type { TrackDto } from "@/lib/catalog";
 import { cn } from "@/lib/cn";
 
-type SearchState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "done"; proposals: Proposal[]; partial: boolean }
-  | { kind: "error"; message: string };
+type SearchStatus = { kind: "idle" } | { kind: "loading" } | { kind: "done" } | { kind: "error"; message: string };
 
 const message = (error: unknown, fallback: string) =>
   error instanceof ApiError && error.code === "proposal_expired"
@@ -41,7 +45,12 @@ export function MetadataDialog({
   onApplied: (result: MetadataApplyResult) => void;
 }) {
   const [query, setQuery] = useState(() => metadataQuery(track));
-  const [search, setSearch] = useState<SearchState>({ kind: "idle" });
+  const [search, setSearch] = useState<SearchStatus>({ kind: "idle" });
+  // Kept while a new search runs, and when the server skipped it (rate limit).
+  const [results, setResults] = useState<MetadataResults | null>(null);
+  const [cooling, setCooling] = useState(false);
+  // Read during the first render, before the dialog moves the focus into itself.
+  const [returnTarget] = useState(() => document.activeElement as HTMLElement | null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [applyCover, setApplyCover] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -50,8 +59,10 @@ export function MetadataDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const coolingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const proposals = search.kind === "done" ? search.proposals : [];
+  const proposals = results?.proposals ?? [];
+  const notice = search.kind === "done" && results ? metadataResultsNotice(results) : null;
   const selected = proposals.find((proposal) => proposal.id === selectedId) ?? null;
 
   const runSearch = (q: string) => {
@@ -60,35 +71,44 @@ export function MetadataDialog({
     const controller = new AbortController();
     controllerRef.current = controller;
     setSearch({ kind: "loading" });
-    setSelectedId(null);
     setApplyError(null);
+    // The server takes one request per second per provider: a quicker click would be skipped.
+    setCooling(true);
+    if (coolingTimer.current) clearTimeout(coolingTimer.current);
+    coolingTimer.current = setTimeout(() => setCooling(false), METADATA_SEARCH_COOLDOWN_MS);
     adminApi
       .searchMetadata(q.trim(), { signal: controller.signal })
-      .then(({ proposals: found, partial }) => {
+      .then((result) => {
         if (controller.signal.aborted) return;
-        setSearch({ kind: "done", proposals: found, partial });
-        const first = found[0];
+        setSearch({ kind: "done" });
+        setResults((current) => nextMetadataResults(current?.proposals ?? [], result));
+        if (result.skipped) return;
+        const first = result.proposals[0];
         setSelectedId(first?.id ?? null);
         setApplyCover(first?.coverUrl != null);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        setResults(null);
+        setSelectedId(null);
         setSearch({ kind: "error", message: message(error, "Recherche impossible") });
       });
   };
 
-  // Searches once, on open, with the prefilled query; aborts whatever is in flight on close.
+  // Searches once, on open, with the prefilled query. On close: aborts whatever is in flight
+  // and gives the focus back to what had it, else to the track row, else to the panel.
   useEffect(() => {
+    const trackId = track.id;
     inputRef.current?.focus();
     runSearch(metadataQuery(track));
-    return () => controllerRef.current?.abort();
-  }, []);
-
-  // Focus goes back to what had it (the track row) when the dialog closes.
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
     return () => {
-      if (previous?.isConnected) previous.focus();
+      controllerRef.current?.abort();
+      if (coolingTimer.current) clearTimeout(coolingTimer.current);
+      const target =
+        (returnTarget?.isConnected ? returnTarget : null) ??
+        document.querySelector<HTMLElement>(`[data-track-id="${CSS.escape(trackId)}"]`) ??
+        document.querySelector<HTMLElement>("[data-admin-panel]");
+      target?.focus();
     };
   }, []);
 
@@ -192,7 +212,7 @@ export function MetadataDialog({
           />
           <button
             type="submit"
-            disabled={!isMetadataQueryValid(query) || search.kind === "loading"}
+            disabled={!isMetadataQueryValid(query) || search.kind === "loading" || cooling}
             className={cn(buttonVariants({ variant: "primary" }), "shrink-0 disabled:opacity-50")}
           >
             Rechercher
@@ -201,15 +221,19 @@ export function MetadataDialog({
 
         <div className="min-h-24 flex-1 overflow-y-auto" aria-live="polite" aria-busy={search.kind === "loading"}>
           {search.kind === "loading" && (
-            <p className="py-6 text-sm text-purple-200/50">Recherche…</p>
+            <p
+              className={cn(
+                "text-purple-200/50",
+                proposals.length === 0 ? "py-6 text-sm" : "pb-2 text-xs",
+              )}
+            >
+              Recherche…
+            </p>
           )}
           {search.kind === "error" && (
             <p role="alert" className="py-6 text-sm text-red-200">
               {search.message}
             </p>
-          )}
-          {search.kind === "done" && proposals.length === 0 && (
-            <p className="py-6 text-sm text-purple-200/50">Aucune proposition</p>
           )}
           {proposals.length > 0 && (
             <fieldset>
@@ -263,9 +287,14 @@ export function MetadataDialog({
               </ul>
             </fieldset>
           )}
-          {search.kind === "done" && search.partial && (
-            <p className="pt-2 text-xs text-purple-200/50">
-              Certains fournisseurs n'ont pas répondu
+          {notice && (
+            <p
+              className={cn(
+                "text-purple-200/50",
+                proposals.length === 0 ? "py-6 text-sm" : "pt-2 text-xs",
+              )}
+            >
+              {notice}
             </p>
           )}
         </div>

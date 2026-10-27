@@ -119,6 +119,7 @@ export function addMetadataApplyRoute(routes: Hono<AuthEnv>, deps: MetadataDeps)
         return catalogErrorResponse(c, error);
       }
       let coverApplied = false;
+      let coverFailed = false;
       if (image) {
         const file = storage.scratchPath(id);
         try {
@@ -133,13 +134,19 @@ export function addMetadataApplyRoute(routes: Hono<AuthEnv>, deps: MetadataDeps)
           if (error instanceof TrackNotFound) {
             return jsonError(c, 404, "not_found", "Track not found");
           }
-          throw error;
+          // The text is committed: report the cover as not applied, never a 500.
+          coverFailed = true;
+          deps.log?.("metadata.cover_failed", {
+            trackId: id,
+            error: error instanceof Error ? error.name : "unknown",
+            message: error instanceof Error ? error.message : "",
+          });
         } finally {
           await rm(file, { force: true });
         }
       }
       const result = { track: toTrackDto(track), tagsWritten, coverApplied };
-      if (coverRejected) {
+      if (coverRejected || coverFailed) {
         // The text is applied; the error envelope says the cover was not.
         return c.json(
           {

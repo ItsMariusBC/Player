@@ -1,7 +1,12 @@
 // lib/admin-format.ts
 // Pure helpers of the admin panel (folder labels, track order, durations). No React here,
 // so the Bun unit tests import them directly.
-import type { MetadataSearchResult, Proposal } from "@/lib/admin-api";
+import type {
+  HealthReport,
+  MaintenanceStatus,
+  MetadataSearchResult,
+  Proposal,
+} from "@/lib/admin-api";
 import { folderAncestors, type FolderNode, type TrackDto } from "@/lib/catalog";
 
 export const INBOX_LABEL = "Boîte d'arrivée";
@@ -192,4 +197,51 @@ export function batchResultLabel(result: {
   const failed = result.failed ?? 0;
   if (failed > 0) label += `, ${failed} échec${failed > 1 ? "s" : ""}`;
   return label;
+}
+
+/** "512 Mo", "1,2 Go", "0 o": binary units with French names, one decimal at most. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go", "To"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const text = unit === 0 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, "");
+  return `${text.replace(".", ",")} ${units[unit]}`;
+}
+
+/** "Système : v1.2.3 · 12,4 Go libres · migrations 6/6", plus the reasons when degraded. */
+export function healthLabel(report: HealthReport): string {
+  const parts = [
+    `Système : v${report.version}`,
+    report.disk ? `${formatBytes(report.disk.freeBytes)} libres` : "espace disque inconnu",
+    `migrations ${report.migrations.applied}/${report.migrations.expected}`,
+  ];
+  let label = parts.join(" · ");
+  if (report.status === "degraded") label += ` · dégradé : ${report.reasons.join(", ")}`;
+  return label;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** "27/10/2026 14:05" in local time; the input as is when it is not a date. */
+function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+/** "Entretien : jamais lancé" or "Entretien : dernière passe 27/10/2026 14:05 (3 orphelins supprimés, 2 imports purgés)". */
+export function maintenanceLabel(status: Pick<MaintenanceStatus, "lastRunAt" | "lastResult">): string {
+  if (!status.lastRunAt) return "Entretien : jamais lancé";
+  const when = formatDateTime(status.lastRunAt);
+  const result = status.lastResult;
+  if (!result) return `Entretien : dernière passe ${when}`;
+  const orphans = result.orphanMedia + result.orphanIncoming;
+  const orphanText = `${orphans} orphelin${orphans > 1 ? "s" : ""} supprimé${orphans > 1 ? "s" : ""}`;
+  const importText = `${result.prunedImports} import${result.prunedImports > 1 ? "s" : ""} purgé${result.prunedImports > 1 ? "s" : ""}`;
+  return `Entretien : dernière passe ${when} (${orphanText}, ${importText})`;
 }

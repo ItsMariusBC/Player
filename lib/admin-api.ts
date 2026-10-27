@@ -302,3 +302,47 @@ export interface BackfillResult {
 export function backfillLoudness(): Promise<BackfillResult> {
   return api<BackfillResult>("/api/admin/loudness/backfill", { method: "POST" });
 }
+
+/** Outcome of one maintenance pass (server/src/admin/maintenance.ts). */
+export interface MaintenanceResult {
+  orphanMedia: number;
+  orphanIncoming: number;
+  prunedImports: number;
+  durationMs: number;
+}
+
+/** GET /api/admin/maintenance. */
+export interface MaintenanceStatus {
+  lastRunAt: string | null;
+  lastResult: MaintenanceResult | null;
+  running: boolean;
+}
+
+export type HealthReason = "migrations_pending" | "low_disk" | "data_dir_unavailable";
+
+/** GET /api/admin/health (server/src/health.ts). */
+export interface HealthReport {
+  status: "ok" | "degraded";
+  reasons: HealthReason[];
+  version: string;
+  uptimeSeconds: number;
+  migrations: { applied: number; expected: number };
+  /** null when the data directory cannot be read. */
+  disk: { freeBytes: number; totalBytes: number } | null;
+  counts: { tracks: number; importsProcessing: number; requestsPending: number };
+  ffmpeg: { available: boolean };
+  maintenance: { lastRunAt: string | null; lastResult: MaintenanceResult | null };
+}
+
+export function getHealth(): Promise<HealthReport> {
+  return api<HealthReport>("/api/admin/health");
+}
+
+export function getMaintenance(): Promise<MaintenanceStatus> {
+  return api<MaintenanceStatus>("/api/admin/maintenance");
+}
+
+/** Runs a maintenance pass now and waits for its result. */
+export function runMaintenance(): Promise<MaintenanceResult> {
+  return api<MaintenanceResult>("/api/admin/maintenance/run", { method: "POST" });
+}

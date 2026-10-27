@@ -135,6 +135,7 @@ Après un déploiement, avec Authentik réel :
 9. Après la migration 6 : déposer un dossier contenant des sous-dossiers et des fichiers audio dans la zone de dépôt (ou « Importer un dossier ») : l'arborescence est recréée sous le dossier sélectionné et chaque titre s'y range ; un dossier de plus de 500 fichiers affiche « Trop de fichiers (500 max) » sans rien envoyer.
 10. Importer par URL une adresse locale ou privée (par exemple `https://127.0.0.1/a.mp3` est refusée d'emblée, `https://localhost/a.mp3` échoue) : l'import passe à `failed` avec un message de téléchargement (adresse refusée) ; une URL publique valide vers un WAV ou MP3 donne un titre dans le dossier sélectionné.
 11. Cocher plusieurs titres : « Déplacer vers… » les range dans le dossier choisi, « Artiste… » puis « Appliquer » change l'artiste des deux, « Supprimer » puis « Oui » les retire ; la bannière indique le nombre de titres touchés.
+12. Dans l'onglet Catalogue, sous la ligne « Volume » : la ligne « Système : v<version> · <espace libre> libres · migrations n/n » s'affiche (en rouge avec « dégradé : <raisons> » si `/healthz` répond 503) et la ligne « Entretien : jamais lancé » ou « dernière passe <date> (…) » ; cliquer sur « Lancer l'entretien » met la date à jour. `curl -i http://localhost:8080/healthz` répond `200 ok`.
 
 ### Recette des demandes de sons
 

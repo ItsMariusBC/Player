@@ -160,11 +160,14 @@ export function listUserRequests(db: DatabaseSync, userId: string, limit = 50): 
     .all(userId, limit) as unknown as RequestRow[];
 }
 
-/** Pending first, then accepted; most recent first within each. */
+/**
+ * Open requests (pending, then accepted) always come first and are never cut by the limit
+ * while closed ones fill what is left; most recent first within each group.
+ */
 export function listAllRequests(db: DatabaseSync, limit = 200): RequestRow[] {
   return db
     .prepare(
-      `SELECT ${COLUMNS}, u.display_name FROM song_requests r LEFT JOIN users u ON u.id = r.user_id ORDER BY (r.status = 'pending') DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
+      `SELECT ${COLUMNS}, u.display_name FROM song_requests r LEFT JOIN users u ON u.id = r.user_id ORDER BY (r.status IN ('pending', 'accepted')) DESC, (r.status = 'pending') DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
     )
     .all(limit) as unknown as RequestRow[];
 }

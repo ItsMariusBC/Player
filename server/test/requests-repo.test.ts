@@ -132,6 +132,27 @@ describe("song request repository", () => {
     assert.equal(listUserRequests(db, "u1", 1).length, 1);
   });
 
+  it("never cuts open requests with the limit, whatever the number of closed ones", () => {
+    const old = createRequest(db, input({ title: "Old pending" }), at(1));
+    const accepted = createRequest(db, input({ title: "Accepted" }), at(2));
+    acceptRequest(db, accepted.id, at(3));
+    for (let i = 0; i < 30; i++) {
+      const row = createRequest(db, input({ title: `Closed ${i}` }), at(10 + i));
+      rejectRequest(db, row.id, null, at(100 + i));
+    }
+    const small = listAllRequests(db, 3);
+    assert.deepEqual(
+      small.slice(0, 2).map((r) => r.id),
+      [old.id, accepted.id],
+    );
+    assert.equal(small[2]!.status, "rejected");
+    assert.equal(small[2]!.title, "Closed 29");
+    assert.deepEqual(
+      listAllRequests(db, 2).map((r) => r.id),
+      [old.id, accepted.id],
+    );
+  });
+
   it("accepts once, then reports not_pending; null when absent", () => {
     const row = createRequest(db, input(), at(1));
     const accepted = acceptRequest(db, row.id, at(5));

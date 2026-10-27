@@ -9,7 +9,8 @@ export interface AdminCatalogState {
   status: "loading" | "ready" | "error";
   /** Last catalogue received; kept when a later refresh fails. */
   catalog?: Catalog;
-  refreshAdmin(): Promise<void>;
+  /** Resolves with the catalogue just fetched. */
+  refreshAdmin(): Promise<Catalog>;
 }
 
 export function useAdminCatalog(onError: (error: unknown) => void): AdminCatalogState {
@@ -25,6 +26,7 @@ export function useAdminCatalog(onError: (error: unknown) => void): AdminCatalog
     try {
       const catalog = await fetchCatalog();
       if (mounted.current && request === latest.current) setState({ status: "ready", catalog });
+      return catalog;
     } catch (error) {
       if (mounted.current && request === latest.current) {
         setState((prev) => ({ status: "error", catalog: prev.catalog }));

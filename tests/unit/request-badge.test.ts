@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  REQUESTS_SEEN_KEY,
-  markSeen,
-  readSeenAt,
-  unseenRequestChanges,
-} from "../../lib/request-badge";
+import { markSeen, readSeenAt, seenKey, unseenRequestChanges } from "../../lib/request-badge";
 
 const memory = () => {
   const data = new Map<string, string>();
@@ -23,15 +18,24 @@ const req = (status: "pending" | "accepted" | "added" | "rejected", updatedAt: s
 describe("seen storage", () => {
   test("round-trips an ISO date under the versioned key", () => {
     const storage = memory();
-    expect(readSeenAt(storage)).toBeNull();
-    markSeen(storage, Date.UTC(2026, 9, 27, 12));
-    expect(storage.data.get(REQUESTS_SEEN_KEY)).toBe("2026-10-27T12:00:00.000Z");
-    expect(readSeenAt(storage)).toBe("2026-10-27T12:00:00.000Z");
+    expect(readSeenAt("u1", storage)).toBeNull();
+    markSeen("u1", storage, Date.UTC(2026, 9, 27, 12));
+    expect(seenKey("u1")).toBe("player.requests.seen.v1:u1");
+    expect(storage.data.get("player.requests.seen.v1:u1")).toBe("2026-10-27T12:00:00.000Z");
+    expect(readSeenAt("u1", storage)).toBe("2026-10-27T12:00:00.000Z");
+  });
+  test("keeps one date per user", () => {
+    const storage = memory();
+    markSeen("u1", storage, Date.UTC(2026, 9, 27, 12));
+    expect(readSeenAt("u2", storage)).toBeNull();
+    markSeen("u2", storage, Date.UTC(2026, 9, 27, 13));
+    expect(readSeenAt("u1", storage)).toBe("2026-10-27T12:00:00.000Z");
+    expect(readSeenAt("u2", storage)).toBe("2026-10-27T13:00:00.000Z");
   });
   test("ignores garbage and survives throwing or missing storage", () => {
     const storage = memory();
-    storage.data.set(REQUESTS_SEEN_KEY, "nope");
-    expect(readSeenAt(storage)).toBeNull();
+    storage.data.set(seenKey("u1"), "nope");
+    expect(readSeenAt("u1", storage)).toBeNull();
     const broken = {
       getItem: () => {
         throw new Error("blocked");
@@ -40,10 +44,10 @@ describe("seen storage", () => {
         throw new Error("blocked");
       },
     };
-    expect(readSeenAt(broken)).toBeNull();
-    expect(() => markSeen(broken, 0)).not.toThrow();
-    expect(readSeenAt(null)).toBeNull();
-    expect(() => markSeen(null, 0)).not.toThrow();
+    expect(readSeenAt("u1", broken)).toBeNull();
+    expect(() => markSeen("u1", broken, 0)).not.toThrow();
+    expect(readSeenAt("u1", null)).toBeNull();
+    expect(() => markSeen("u1", null, 0)).not.toThrow();
   });
 });
 

@@ -27,6 +27,7 @@ import {
   type SongRequestDto,
 } from "@/lib/requests-api";
 import { requestDetails, requestErrorMessage, requestStatusDetail } from "@/lib/requests-format";
+import { useSessionInfo } from "@/components/auth-gate";
 import { markSeen } from "@/lib/request-badge";
 
 type SearchStatus =
@@ -62,6 +63,8 @@ export function SongRequestDialog({ onClose, canPlay, onPlay }: SongRequestDialo
   const [requestsError, setRequestsError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState<ReadonlySet<string>>(() => new Set());
   const [brokenCovers, setBrokenCovers] = useState<ReadonlySet<string>>(() => new Set());
+  const { user } = useSessionInfo();
+  const userIdRef = useRef(user.id);
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -105,7 +108,7 @@ export function SongRequestDialog({ onClose, canPlay, onPlay }: SongRequestDialo
     const loadController = new AbortController();
     mountedRef.current = true;
     inputRef.current?.focus();
-    markSeen();
+    markSeen(userIdRef.current);
     listMyRequests()
       .then((list) => {
         if (!loadController.signal.aborted) setRequests(list);
@@ -116,6 +119,7 @@ export function SongRequestDialog({ onClose, canPlay, onPlay }: SongRequestDialo
         setRequestsError(requestErrorMessage(error));
       });
     return () => {
+      markSeen(userIdRef.current);
       mountedRef.current = false;
       loadController.abort();
       queueMicrotask(() => {

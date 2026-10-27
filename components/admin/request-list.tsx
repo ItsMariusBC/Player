@@ -108,6 +108,33 @@ function RequestRow({
     if (confirming) noRef.current?.focus();
   }, [confirming]);
 
+  // Leaving the reject form or the delete confirm returns the focus to the button that opened it.
+  const rejectButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const focusBack = useRef<"reject" | "delete" | null>(null);
+  useEffect(() => {
+    if (rejecting || confirming || !focusBack.current) return;
+    const target = focusBack.current === "reject" ? rejectButtonRef : deleteButtonRef;
+    focusBack.current = null;
+    target.current?.focus();
+  }, [rejecting, confirming]);
+  const closeReject = () => {
+    focusBack.current = "reject";
+    onCancelReject();
+  };
+  const submitReject = (value: string) => {
+    focusBack.current = "reject";
+    onReject(value);
+  };
+  const closeDelete = () => {
+    focusBack.current = "delete";
+    onCancelDelete();
+  };
+  const submitDelete = () => {
+    focusBack.current = "delete";
+    onDelete();
+  };
+
   const details = requestDetails(request);
   const author = request.requestedBy.displayName || "utilisateur inconnu";
   const date = new Date(request.createdAt).toLocaleDateString("fr-FR");
@@ -159,7 +186,7 @@ function RequestRow({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
-              onCancelDelete();
+              closeDelete();
             }
           }}
         >
@@ -168,7 +195,7 @@ function RequestRow({
             type="button"
             disabled={busy}
             className={cn(actionClass, "text-red-200 hover:bg-red-500/20")}
-            onClick={onDelete}
+            onClick={submitDelete}
           >
             Oui
           </button>
@@ -176,7 +203,7 @@ function RequestRow({
             ref={noRef}
             type="button"
             className={actionClass}
-            onClick={onCancelDelete}
+            onClick={closeDelete}
           >
             Non
           </button>
@@ -191,7 +218,7 @@ function RequestRow({
               event.preventDefault();
               event.stopPropagation();
               event.nativeEvent.stopImmediatePropagation();
-              onCancelReject();
+              closeReject();
             }
           }}
         >
@@ -205,18 +232,18 @@ function RequestRow({
             className={inputClass}
             onChange={(event) => setReason(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !busy) onReject(reason.trim());
+              if (event.key === "Enter" && !busy) submitReject(reason.trim());
             }}
           />
           <button
             type="button"
             disabled={busy}
             className={actionClass}
-            onClick={() => onReject(reason.trim())}
+            onClick={() => submitReject(reason.trim())}
           >
             Confirmer
           </button>
-          <button type="button" className={actionClass} onClick={onCancelReject}>
+          <button type="button" className={actionClass} onClick={closeReject}>
             Annuler
           </button>
         </div>
@@ -233,7 +260,13 @@ function RequestRow({
             </button>
           )}
           {(request.status === "pending" || request.status === "accepted") && (
-            <button type="button" disabled={busy} className={actionClass} onClick={onAskReject}>
+            <button
+              ref={rejectButtonRef}
+              type="button"
+              disabled={busy}
+              className={actionClass}
+              onClick={onAskReject}
+            >
               Refuser
             </button>
           )}
@@ -243,6 +276,7 @@ function RequestRow({
             </button>
           )}
           <button
+            ref={deleteButtonRef}
             type="button"
             disabled={busy}
             className={cn(actionClass, "text-red-200 hover:bg-red-500/20")}

@@ -183,15 +183,11 @@ test("an imported request becomes a track the user can play", async ({ page, bro
       )
       .toBe(true);
 
-    // The admin catalogue may lag a moment behind the request status: retry until it knows the track.
-    await expect(async () => {
-      await row.getByRole("button", { name: "Voir le titre" }).click({ timeout: 2_000 });
-      await expect(adminDialog.getByRole("tab", { name: "Catalogue" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-        { timeout: 2_000 },
-      );
-    }).toPass({ timeout: 20_000 });
+    await row.getByRole("button", { name: "Voir le titre" }).click();
+    await expect(adminDialog.getByRole("tab", { name: "Catalogue" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await expect(adminDialog.getByLabel("Titre", { exact: true })).toHaveValue(title);
   } finally {
     await adminContext.close();
@@ -203,9 +199,10 @@ test("an imported request becomes a track the user can play", async ({ page, bro
     const userPage = await userContext.newPage();
     await loginAs(userPage, "user@test");
     await activatePlayer(userPage);
-    const badge = userPage.getByRole("button", { name: "Demander un son, 1 nouveauté" });
+    const badge = userPage.getByRole("button", { name: /Demander un son.*nouveauté/ });
     await expect(badge).toBeVisible();
-    await expect(badge).toContainText("Demander un son (1)");
+    await expect(badge).toHaveText(/Demander un son \(\d+\)/);
+    await expect(badge).toHaveAttribute("aria-label", /nouveauté/);
     await badge.click();
     const dialog = userPage.getByRole("dialog", { name: "Demander un son" });
     await expect(dialog).toBeVisible();

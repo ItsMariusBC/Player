@@ -37,13 +37,13 @@ export default function MusicPlayer() {
   const [visualizerExpanded, setVisualizerExpanded] = useState(false);
   const closeVisualizer = useCallback(() => setVisualizerExpanded(false), []);
   // Admin panel: unmounts the rest of the UI the same way.
-  const { role } = useSessionInfo();
+  const { role, user } = useSessionInfo();
   const [adminOpen, setAdminOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
   const closeRequest = useCallback(() => setRequestOpen(false), []);
   // The user's requests feed the « nouveautés » badge: loaded at mount and after each close of
-  // the dialog (it writes the « seen » key on opening). Errors are ignored: the badge is optional.
+  // the dialog (it writes the « seen » key on opening and on closing). Errors are ignored: the badge is optional.
   const [myRequests, setMyRequests] = useState<SongRequestDto[]>([]);
   useEffect(() => {
     if (requestOpen) return;
@@ -57,7 +57,7 @@ export default function MusicPlayer() {
       active = false;
     };
   }, [requestOpen]);
-  const unseenRequests = requestOpen ? 0 : unseenRequestChanges(myRequests, readSeenAt());
+  const unseenRequests = requestOpen ? 0 : unseenRequestChanges(myRequests, readSeenAt(user.id));
   const focusMode = visualizerExpanded || adminOpen;
   // Server catalogue. `queued` is the catalogue currently loaded in the queue:
   // the player renders only once the first one is in, so no empty-queue flash.

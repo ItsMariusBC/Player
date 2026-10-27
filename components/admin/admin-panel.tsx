@@ -120,9 +120,21 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     };
   }, [showError]);
 
+  // The admin catalogue first (the fulfilled request's track must exist), then the requests.
   const onImported = useCallback(() => {
-    Promise.all([refreshAdmin(), onCatalogChanged()]).catch(showError);
-  }, [refreshAdmin, onCatalogChanged, showError]);
+    void (async () => {
+      try {
+        await Promise.all([refreshAdmin(), onCatalogChanged()]);
+      } catch (error) {
+        showError(error);
+      }
+      try {
+        await refreshRequests();
+      } catch (error) {
+        showError(error);
+      }
+    })();
+  }, [refreshAdmin, onCatalogChanged, refreshRequests, showError]);
   const getFolders = useCallback(() => folders, [folders]);
   const imports = useImportQueue({
     maxUploadBytes,
@@ -239,8 +251,18 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     setView("catalog");
   };
 
-  const showRequestTrack = (request: AdminSongRequestDto) => {
-    const track = request.trackId ? tracks.find((t) => t.id === request.trackId) : undefined;
+  const showRequestTrack = async (request: AdminSongRequestDto) => {
+    const trackId = request.trackId;
+    let track = trackId ? tracks.find((t) => t.id === trackId) : undefined;
+    if (!track && trackId) {
+      try {
+        const fresh = await refreshAdmin();
+        track = fresh.tracks.find((t) => t.id === trackId);
+      } catch (error) {
+        showError(error);
+        return;
+      }
+    }
     if (!track) {
       setBanner({ text: "Titre introuvable", tone: "notice" });
       return;
@@ -660,7 +682,7 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
             onDelete={(request) => deleteOne(request.id)}
             onImport={startImport}
             onReject={(request, reason) => rejectOne(request.id, reason)}
-            onShowTrack={showRequestTrack}
+            onShowTrack={(request) => void showRequestTrack(request)}
           />
         </div>
       )}

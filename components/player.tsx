@@ -8,6 +8,7 @@ import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
 import { useSongGradient } from "@/lib/hooks/use-song-gradient";
 import { useCatalog } from "@/lib/hooks/use-catalog";
 import { type Catalog, flattenCatalog } from "@/lib/catalog";
+import { bindResumeSaver, readResumeState, resumeTarget } from "@/lib/resume-state";
 import { VisualizerCard, VisualizerStage } from "@/components/visualizer-panel";
 import { AnimatePresence, LazyMotion, MotionConfig, m } from "framer-motion";
 
@@ -74,6 +75,9 @@ export default function MusicPlayer() {
   const currentSong = musicManager?.queueManager.getCurrentSong();
   const gradient = useSongGradient(currentSong);
 
+  const restoredRef = useRef(false);
+  const unbindResumeRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const player = createPlayerRuntime({
       onToggleMiniPlayer: () => setShowMiniPlayer((prev) => !prev),
@@ -85,6 +89,9 @@ export default function MusicPlayer() {
     setRuntime(player);
 
     return () => {
+      unbindResumeRef.current?.();
+      unbindResumeRef.current = null;
+      restoredRef.current = false;
       unsubscribe();
       player.destroy();
     };
@@ -94,9 +101,23 @@ export default function MusicPlayer() {
   // queue keeps the current track by id (see QueueManager.setSongs).
   useEffect(() => {
     if (!runtime || !catalog) return;
-    runtime.music.queueManager.setSongs(flattenCatalog(catalog));
+    const { music } = runtime;
+    const songs = flattenCatalog(catalog);
+    music.queueManager.setSongs(songs);
+    if (!restoredRef.current) {
+      restoredRef.current = true;
+      // Restore before binding the saver so the restore itself is not saved
+      // back as position 0. Never autoplay: the activation overlay stays.
+      const target = resumeTarget(songs, readResumeState(), Date.now());
+      if (target) {
+        music.queueManager.setIndex(target.index);
+        if (target.position > 0) music.setTime(target.position);
+      }
+      unbindResumeRef.current = bindResumeSaver(music);
+    }
     setQueued(catalog);
   }, [runtime, catalog]);
+
 
   // Effect pour détecter la première interaction de l'utilisateur
   useEffect(() => {

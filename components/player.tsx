@@ -21,6 +21,8 @@ import { UpNext } from "@/components/up-next";
 import { ProgressBar } from "@/components/progress-bar";
 import { SongNotificationProvider } from "@/components/song-notification";
 import { cn } from "@/lib/cn";
+import { listMyRequests, type SongRequestDto } from "@/lib/requests-api";
+import { readSeenAt, unseenRequestChanges } from "@/lib/request-badge";
 import { buttonVariants } from "@/components/ui/button";
 
 export default function MusicPlayer() {
@@ -40,6 +42,22 @@ export default function MusicPlayer() {
   const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
   const closeRequest = useCallback(() => setRequestOpen(false), []);
+  // The user's requests feed the « nouveautés » badge: loaded at mount and after each close of
+  // the dialog (it writes the « seen » key on opening). Errors are ignored: the badge is optional.
+  const [myRequests, setMyRequests] = useState<SongRequestDto[]>([]);
+  useEffect(() => {
+    if (requestOpen) return;
+    let active = true;
+    listMyRequests()
+      .then((list) => {
+        if (active) setMyRequests(list);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [requestOpen]);
+  const unseenRequests = requestOpen ? 0 : unseenRequestChanges(myRequests, readSeenAt());
   const focusMode = visualizerExpanded || adminOpen;
   // Server catalogue. `queued` is the catalogue currently loaded in the queue:
   // the player renders only once the first one is in, so no empty-queue flash.
@@ -217,7 +235,14 @@ export default function MusicPlayer() {
           ) : (
           <div className="w-full max-w-6xl mx-auto">
             {requestOpen ? (
-              <SongRequestDialog onClose={closeRequest} />
+              <SongRequestDialog
+                onClose={closeRequest}
+                canPlay={(trackId) => runtime.music.queueManager.songs.some((song) => song.id === trackId)}
+                onPlay={(trackId) => {
+                  const item = runtime.music.queueManager.songs.find((song) => song.id === trackId);
+                  if (item) runtime.playback.playSong(item);
+                }}
+              />
             ) : (
             <div className="grid md:grid-cols-12 gap-8">
               <div className="md:col-span-8">
@@ -238,9 +263,21 @@ export default function MusicPlayer() {
                     type="button"
                     data-request-button=""
                     className={cn(buttonVariants({ variant: "ghost" }), "shrink-0 w-full mt-3")}
+                    aria-label={
+                      unseenRequests > 0
+                        ? `Demander un son, ${unseenRequests} ${unseenRequests === 1 ? "nouveauté" : "nouveautés"}`
+                        : undefined
+                    }
                     onClick={() => setRequestOpen(true)}
                   >
-                    Demander un son
+                    {unseenRequests > 0 && (
+                      <span
+                        aria-hidden="true"
+                        data-request-badge=""
+                        className="mr-2 inline-block size-2 rounded-full bg-purple-300"
+                      />
+                    )}
+                    Demander un son{unseenRequests > 0 ? ` (${unseenRequests})` : ""}
                   </button>
                 </div>
               </div>

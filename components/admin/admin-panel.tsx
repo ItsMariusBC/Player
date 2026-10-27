@@ -34,7 +34,7 @@ import { performLogout } from "@/lib/api";
 import { useAdminCatalog } from "@/lib/hooks/use-admin-catalog";
 import { useAdminRequests } from "@/lib/hooks/use-admin-requests";
 import { useImportQueue } from "@/lib/hooks/use-import-queue";
-import { acceptRequest, deleteRequest } from "@/lib/requests-api";
+import { acceptRequest, deleteRequest, rejectRequest, type AdminSongRequestDto } from "@/lib/requests-api";
 import { entryLabel } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
@@ -216,6 +216,39 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   );
 
   const acceptOne = (requestId: string) => void runRequestAction(() => acceptRequest(requestId));
+
+  const rejectOne = (requestId: string, reason: string) =>
+    void runRequestAction(() => rejectRequest(requestId, reason || undefined));
+
+  // « Importer » stores the request, then opens the panel's own picker; the chosen file goes
+  // out with the request and the current folder, and the import queue (catalogue tab) shows it.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const importRequestRef = useRef<AdminSongRequestDto | null>(null);
+  const startImport = (request: AdminSongRequestDto) => {
+    importRequestRef.current = request;
+    importInputRef.current?.click();
+  };
+  const onImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    const request = importRequestRef.current;
+    importRequestRef.current = null;
+    input.value = "";
+    if (!file || !request) return;
+    imports.addFiles([file], { folderId, requestId: request.id, requestTitle: request.title });
+    setView("catalog");
+  };
+
+  const showRequestTrack = (request: AdminSongRequestDto) => {
+    const track = request.trackId ? tracks.find((t) => t.id === request.trackId) : undefined;
+    if (!track) {
+      setBanner({ text: "Titre introuvable", tone: "notice" });
+      return;
+    }
+    setView("catalog");
+    selectFolder(track.folderId);
+    selectTrack(track.id);
+  };
 
   const deleteOne = (requestId: string) => void runRequestAction(() => deleteRequest(requestId));
 
@@ -604,6 +637,15 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
         </div>
       )}
 
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".flac,.mp3,.wav"
+        hidden
+        data-request-import-input=""
+        onChange={onImportFile}
+      />
+
       {view === "requests" && (
         <div
           role="tabpanel"
@@ -616,6 +658,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
             busy={inFlight > 0}
             onAccept={(request) => acceptOne(request.id)}
             onDelete={(request) => deleteOne(request.id)}
+            onImport={startImport}
+            onReject={(request, reason) => rejectOne(request.id, reason)}
+            onShowTrack={showRequestTrack}
           />
         </div>
       )}

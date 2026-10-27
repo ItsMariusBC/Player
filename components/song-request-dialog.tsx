@@ -26,7 +26,8 @@ import {
   type Proposal,
   type SongRequestDto,
 } from "@/lib/requests-api";
-import { requestDetails, requestErrorMessage, requestStatusLabel } from "@/lib/requests-format";
+import { requestDetails, requestErrorMessage, requestStatusDetail } from "@/lib/requests-format";
+import { markSeen } from "@/lib/request-badge";
 
 type SearchStatus =
   | { kind: "idle" }
@@ -37,7 +38,15 @@ type SearchStatus =
 const FOCUSABLE =
   "button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
-export function SongRequestDialog({ onClose }: { onClose: () => void }) {
+export interface SongRequestDialogProps {
+  onClose: () => void;
+  /** True when the track is in the player queue (« Écouter » only shows then). */
+  canPlay?: (trackId: string) => boolean;
+  /** Starts the track; the dialog closes right after. */
+  onPlay?: (trackId: string) => void;
+}
+
+export function SongRequestDialog({ onClose, canPlay, onPlay }: SongRequestDialogProps) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchStatus>({ kind: "idle" });
   const [results, setResults] = useState<MetadataResults | null>(null);
@@ -96,6 +105,7 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
     const loadController = new AbortController();
     mountedRef.current = true;
     inputRef.current?.focus();
+    markSeen();
     listMyRequests()
       .then((list) => {
         if (!loadController.signal.aborted) setRequests(list);
@@ -392,8 +402,23 @@ export function SongRequestDialog({ onClose }: { onClose: () => void }) {
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="text-xs text-purple-200/70">
-                          {requestStatusLabel(request.status)}
+                          {requestStatusDetail(request)}
                         </span>
+                        {request.status === "added" &&
+                          request.trackId &&
+                          onPlay &&
+                          canPlay?.(request.trackId) && (
+                            <button
+                              type="button"
+                              className={cn(buttonVariants({ variant: "ghost" }), "px-2")}
+                              onClick={() => {
+                                onPlay(request.trackId as string);
+                                onClose();
+                              }}
+                            >
+                              Écouter
+                            </button>
+                          )}
                         {request.status === "pending" && (
                           <button
                             type="button"

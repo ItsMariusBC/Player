@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import type { AdminSongRequestDto } from "@/lib/requests-api";
-import { requestDetails, requestStatusLabel } from "@/lib/requests-format";
+import { requestDetails, requestStatusDetail } from "@/lib/requests-format";
+import { inputClass } from "@/components/admin/folder-tree";
 import { cn } from "@/lib/cn";
 
 export interface RequestListProps {
@@ -13,12 +14,24 @@ export interface RequestListProps {
   busy: boolean;
   onAccept: (request: AdminSongRequestDto) => void;
   onDelete: (request: AdminSongRequestDto) => void;
+  onImport: (request: AdminSongRequestDto) => void;
+  onReject: (request: AdminSongRequestDto, reason: string) => void;
+  onShowTrack: (request: AdminSongRequestDto) => void;
 }
 
 const actionClass = cn(buttonVariants({ variant: "ghost" }), "disabled:opacity-50");
 
-export function RequestList({ requests, busy, onAccept, onDelete }: RequestListProps) {
+export function RequestList({
+  requests,
+  busy,
+  onAccept,
+  onDelete,
+  onImport,
+  onReject,
+  onShowTrack,
+}: RequestListProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   if (requests.length === 0) {
     return <p className="py-6 text-sm text-purple-200/50">Aucune demande</p>;
@@ -32,6 +45,15 @@ export function RequestList({ requests, busy, onAccept, onDelete }: RequestListP
           request={request}
           busy={busy}
           confirming={confirmingId === request.id}
+          rejecting={rejectingId === request.id}
+          onAskReject={() => setRejectingId(request.id)}
+          onCancelReject={() => setRejectingId(null)}
+          onReject={(reason) => {
+            setRejectingId(null);
+            onReject(request, reason);
+          }}
+          onImport={() => onImport(request)}
+          onShowTrack={() => onShowTrack(request)}
           onAskDelete={() => setConfirmingId(request.id)}
           onCancelDelete={() => setConfirmingId(null)}
           onAccept={() => onAccept(request)}
@@ -49,6 +71,12 @@ function RequestRow({
   request,
   busy,
   confirming,
+  rejecting,
+  onAskReject,
+  onCancelReject,
+  onReject,
+  onImport,
+  onShowTrack,
   onAskDelete,
   onCancelDelete,
   onAccept,
@@ -57,6 +85,12 @@ function RequestRow({
   request: AdminSongRequestDto;
   busy: boolean;
   confirming: boolean;
+  rejecting: boolean;
+  onAskReject: () => void;
+  onCancelReject: () => void;
+  onReject: (reason: string) => void;
+  onImport: () => void;
+  onShowTrack: () => void;
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onAccept: () => void;
@@ -64,6 +98,12 @@ function RequestRow({
 }) {
   const [coverFailed, setCoverFailed] = useState(false);
   const noRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLInputElement>(null);
+  const [reason, setReason] = useState("");
+  useEffect(() => {
+    if (rejecting) reasonRef.current?.focus();
+    else setReason("");
+  }, [rejecting]);
   useEffect(() => {
     if (confirming) noRef.current?.focus();
   }, [confirming]);
@@ -106,7 +146,7 @@ function RequestRow({
             : "border-purple-100/10 text-purple-200/60",
         )}
       >
-        {requestStatusLabel(request.status)}
+        {requestStatusDetail(request)}
       </span>
       {confirming ? (
         <div
@@ -141,11 +181,65 @@ function RequestRow({
             Non
           </button>
         </div>
+      ) : rejecting ? (
+        <div
+          role="group"
+          aria-label="Refuser la demande"
+          className="flex shrink-0 items-center gap-1"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              event.nativeEvent.stopImmediatePropagation();
+              onCancelReject();
+            }
+          }}
+        >
+          <input
+            ref={reasonRef}
+            type="text"
+            value={reason}
+            maxLength={200}
+            aria-label="Motif (facultatif)"
+            placeholder="Motif (facultatif)"
+            className={inputClass}
+            onChange={(event) => setReason(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !busy) onReject(reason.trim());
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy}
+            className={actionClass}
+            onClick={() => onReject(reason.trim())}
+          >
+            Confirmer
+          </button>
+          <button type="button" className={actionClass} onClick={onCancelReject}>
+            Annuler
+          </button>
+        </div>
       ) : (
         <div className="flex shrink-0 items-center gap-1">
+          {(request.status === "pending" || request.status === "accepted") && (
+            <button type="button" disabled={busy} className={actionClass} onClick={onImport}>
+              Importer
+            </button>
+          )}
           {request.status === "pending" && (
             <button type="button" disabled={busy} className={actionClass} onClick={onAccept}>
               Valider
+            </button>
+          )}
+          {(request.status === "pending" || request.status === "accepted") && (
+            <button type="button" disabled={busy} className={actionClass} onClick={onAskReject}>
+              Refuser
+            </button>
+          )}
+          {request.status === "added" && request.trackId && (
+            <button type="button" className={actionClass} onClick={onShowTrack}>
+              Voir le titre
             </button>
           )}
           <button

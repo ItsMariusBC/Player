@@ -10,6 +10,7 @@ import { PanelButton } from "@/components/visualizer-panel";
 import { buttonVariants } from "@/components/ui/button";
 import { ContextMenu, type MenuItem } from "@/components/admin/context-menu";
 import { FolderTree } from "@/components/admin/folder-tree";
+import { RequestList } from "@/components/admin/request-list";
 import { MetadataDialog } from "@/components/admin/metadata-dialog";
 import { TrackEditor } from "@/components/admin/track-editor";
 import { TrackTable } from "@/components/admin/track-table";
@@ -25,7 +26,9 @@ import {
 } from "@/lib/admin-format";
 import { performLogout } from "@/lib/api";
 import { useAdminCatalog } from "@/lib/hooks/use-admin-catalog";
+import { useAdminRequests } from "@/lib/hooks/use-admin-requests";
 import { useImportQueue } from "@/lib/hooks/use-import-queue";
+import { acceptRequest, deleteRequest } from "@/lib/requests-api";
 import { entryLabel } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
@@ -53,6 +56,8 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     setBanner(errorMessage(error));
   }, []);
   const { catalog, refreshAdmin } = useAdminCatalog(showError);
+  const { requests, pending, refresh: refreshRequests } = useAdminRequests(showError);
+  const [view, setView] = useState<"catalog" | "requests">("catalog");
   const folders = catalog?.folders ?? [];
   const tracks = catalog?.tracks ?? [];
 
@@ -153,6 +158,18 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     },
     [refreshAdmin, onCatalogChanged, showError],
   );
+
+  const acceptOne = (requestId: string) =>
+    void run(async () => {
+      await acceptRequest(requestId);
+      await refreshRequests();
+    });
+
+  const deleteOne = (requestId: string) =>
+    void run(async () => {
+      await deleteRequest(requestId);
+      await refreshRequests();
+    });
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -369,7 +386,46 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.9 }}
     >
       <header className="flex items-center justify-between gap-4">
-        <h2 className="text-sm uppercase tracking-widest text-purple-200/70">Administration</h2>
+        <div className="flex items-center gap-6">
+          <h2 className="text-sm uppercase tracking-widest text-purple-200/70">Administration</h2>
+          <div
+            role="tablist"
+            aria-label="Vue"
+            className="flex items-center gap-4"
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const next = view === "catalog" ? "requests" : "catalog";
+              setView(next);
+              document.getElementById(`admin-tab-${next}`)?.focus();
+            }}
+          >
+            {(
+              [
+                ["catalog", "Catalogue"],
+                ["requests", `Demandes (${pending})`],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                id={`admin-tab-${key}`}
+                type="button"
+                role="tab"
+                aria-selected={view === key}
+                tabIndex={view === key ? 0 : -1}
+                className={cn(
+                  "border-b-2 py-1 text-sm uppercase tracking-widest transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60",
+                  view === key
+                    ? "border-purple-200 text-purple-50"
+                    : "border-transparent text-purple-200/50 hover:text-purple-100",
+                )}
+                onClick={() => setView(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -401,7 +457,23 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
         </div>
       )}
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden">
+      {view === "requests" && (
+        <div role="tabpanel" className="mt-4 min-h-0 flex-1 overflow-y-auto">
+          <RequestList
+            requests={requests}
+            busy={inFlight > 0}
+            onAccept={(request) => acceptOne(request.id)}
+            onDelete={(request) => deleteOne(request.id)}
+          />
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "mt-4 min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden",
+          view === "catalog" ? "flex" : "hidden",
+        )}
+      >
         <div className="shrink-0 md:w-64 md:overflow-y-auto">
           <FolderTree
             folders={folders}

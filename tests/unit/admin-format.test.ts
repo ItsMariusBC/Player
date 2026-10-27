@@ -214,5 +214,12 @@ describe("batch labels", () => {
     expect(batchResultLabel({ updated: 2, missing: 3 })).toBe(
       "2 titres mis à jour, 3 introuvables",
     );
+    expect(batchResultLabel({ updated: 2, missing: 0, failed: 1 })).toBe(
+      "2 titres mis à jour, 1 échec",
+    );
+    expect(batchResultLabel({ deleted: 1, missing: 1, failed: 3 })).toBe(
+      "1 titre supprimé, 1 introuvable, 3 échecs",
+    );
+    expect(batchResultLabel({ updated: 2, missing: 0, failed: 0 })).toBe("2 titres mis à jour");
   });
 });

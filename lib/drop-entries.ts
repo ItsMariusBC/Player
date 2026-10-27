@@ -23,12 +23,14 @@ export interface DroppedFile<F = File | FileLike> {
 
 export interface CollectResult {
   files: DroppedFile[];
-  /** More files than maxFiles: the caller sends nothing. */
+  /** More files than maxFiles, or more entries visited than maxVisits: the caller sends nothing. */
   tooMany: boolean;
 }
 
 export const MAX_DROP_FILES = 500;
 export const MAX_DROP_DEPTH = 8;
+/** Entries (files and directories, audio or not) a walk may visit before giving up. */
+export const MAX_DROP_VISITS = 10_000;
 
 const AUDIO_EXTENSION = /\.(flac|mp3|wav)$/i;
 
@@ -36,15 +38,23 @@ export const isAudioName = (name: string): boolean => AUDIO_EXTENSION.test(name)
 
 export async function collectDroppedFiles(
   entries: readonly DropEntry[],
-  opts: { maxFiles?: number; maxDepth?: number } = {},
+  opts: { maxFiles?: number; maxDepth?: number; maxVisits?: number } = {},
 ): Promise<CollectResult> {
   const maxFiles = opts.maxFiles ?? MAX_DROP_FILES;
   const maxDepth = opts.maxDepth ?? MAX_DROP_DEPTH;
+  const maxVisits = opts.maxVisits ?? MAX_DROP_VISITS;
   const files: DroppedFile[] = [];
   let tooMany = false;
+  let visited = 0;
 
   const visit = async (entry: DropEntry, path: string[], depth: number): Promise<void> => {
-    if (tooMany || entry.name.startsWith(".")) return;
+    if (tooMany) return;
+    visited += 1;
+    if (visited > maxVisits) {
+      tooMany = true;
+      return;
+    }
+    if (entry.name.startsWith(".")) return;
     if (entry.isFile) {
       if (!isAudioName(entry.name)) return;
       if (files.length >= maxFiles) {
@@ -109,15 +119,17 @@ export function fromDataTransfer(items: DataTransferItemList): DropEntry[] {
 /** Files of a webkitdirectory input (or a plain picker, where the path is empty). */
 export function fromFileList(
   files: ArrayLike<File | (FileLike & { webkitRelativePath?: string })>,
-  opts: { maxFiles?: number } = {},
+  opts: { maxFiles?: number; maxDepth?: number } = {},
 ): CollectResult {
   const maxFiles = opts.maxFiles ?? MAX_DROP_FILES;
+  const maxDepth = opts.maxDepth ?? MAX_DROP_DEPTH;
   const result: DroppedFile[] = [];
   for (const file of Array.from(files)) {
     const relative = (file as { webkitRelativePath?: string }).webkitRelativePath ?? "";
     const segments = relative === "" ? [file.name] : relative.split("/");
     const hidden = segments.some((segment) => segment.startsWith("."));
-    if (hidden || !isAudioName(file.name)) continue;
+    // Same bound as the entry walk: a file sits in path.length folders, at most maxDepth.
+    if (hidden || !isAudioName(file.name) || segments.length - 1 > maxDepth) continue;
     if (result.length >= maxFiles) return { files: [], tooMany: true };
     result.push({ file, path: segments.slice(0, -1) });
   }

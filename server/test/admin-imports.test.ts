@@ -219,6 +219,35 @@ describe("ingestFile race", () => {
     assert.ok(!existsSync(path.join(t.tempDir, "incoming", "race")));
   });
 
+  it("retries the insert in the inbox when the folder disappears after the check", async () => {
+    t = createTestApp();
+    const { ingestFile } = await import("../src/media/ingest.ts");
+    const file = path.join(t.storage.incomingDir("gone"), "upload.bin");
+    writeWav(file, 1);
+    t.db.prepare("INSERT INTO folders (id, name, created_at) VALUES ('f1', 'Rock', 'x')").run();
+    const result = await ingestFile({
+      db: t.db,
+      storage: t.storage,
+      importId: "gone",
+      file,
+      now: t.now(),
+      // Returns an id that no longer exists by the time the row is inserted.
+      folderId: () => {
+        t.db.prepare("DELETE FROM folders WHERE id = 'f1'").run();
+        return "f1";
+      },
+    });
+    assert.equal(result.kind, "ready");
+    if (result.kind === "ready") assert.equal(result.track.folderId, null);
+    const rows = t.db.prepare("SELECT folder_id FROM tracks").all() as {
+      folder_id: string | null;
+    }[];
+    assert.deepEqual(
+      rows.map((row) => row.folder_id),
+      [null],
+    );
+  });
+
   describe("recoverStaleImports", () => {
     it("fails processing imports, removes their uploads and orphan directories", async () => {
       t = createTestApp();

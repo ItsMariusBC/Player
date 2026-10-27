@@ -4,7 +4,7 @@
 import { useEffect, useRef } from "react";
 import type { TrackDto } from "@/lib/catalog";
 import { coverUrl } from "@/lib/catalog";
-import { TRACK_DRAG_TYPE, formatDuration } from "@/lib/admin-format";
+import { BATCH_MAX, TRACK_DRAG_TYPE, formatDuration } from "@/lib/admin-format";
 import { menuPoint } from "@/components/admin/folder-tree";
 import { cn } from "@/lib/cn";
 
@@ -33,7 +33,8 @@ export function TrackTable({
 }) {
   const headRef = useRef<HTMLInputElement>(null);
   const ticked = tracks.filter((track) => selectedIds.has(track.id)).length;
-  const all = tracks.length > 0 && ticked === tracks.length;
+  // « Tout sélectionner » ticks at most BATCH_MAX tracks: that counts as all.
+  const all = tracks.length > 0 && ticked >= Math.min(tracks.length, BATCH_MAX);
   useEffect(() => {
     if (headRef.current) headRef.current.indeterminate = ticked > 0 && !all;
   }, [ticked, all]);

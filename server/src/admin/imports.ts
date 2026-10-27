@@ -9,6 +9,9 @@ import { measureLoudness, type Loudness } from "../media/loudness.ts";
 import type { MediaStorage } from "../media/storage.ts";
 import { resolveHost } from "../metadata/fetch-guard.ts";
 
+/** Imports allowed in `processing` at once; further requests are answered 429 `too_many_imports`. */
+export const MAX_PROCESSING_IMPORTS = 50;
+
 /** Downloads running at once; further ones wait for a slot. */
 const DOWNLOAD_SLOTS = 2;
 

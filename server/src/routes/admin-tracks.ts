@@ -76,6 +76,7 @@ function parsePatch(body: Record<string, unknown> | null): TrackPatch | null {
   return patch;
 }
 
+// Mirrors BATCH_MAX in lib/admin-format.ts (the panel caps its selection): keep the values equal.
 const BATCH_MAX = 200;
 const BATCH_PATCH_KEYS = ["folderId", "artist", "album"] as const;
 

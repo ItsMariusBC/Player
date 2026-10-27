@@ -115,8 +115,9 @@ async function importTrack(dialog: Locator) {
   const selected = dialog.locator("tr[aria-current=true]");
   await expect(selected).toHaveCount(1);
   const id = (await selected.getAttribute("data-track-id")) as string;
+  // Recorded before any assertion so afterEach always cleans it up.
+  if (id) createdTrackIds.push(id);
   expect(id).toBeTruthy();
-  createdTrackIds.push(id);
   const label = (await selected.getByRole("checkbox").getAttribute("aria-label")) ?? "";
   const title = label.replace(/^Sélectionner /, "");
   expect(title).not.toBe("");
@@ -213,8 +214,13 @@ test("admin imports a directory and gets a folder holding its track", async ({ p
   await expect(albumRow).toBeVisible({ timeout: 20000 });
   await albumRow.click();
   const rows = dialog.locator("tr[data-track-id]");
-  await expect(rows).toHaveCount(1, { timeout: 20000 });
-  const id = await rows.first().getAttribute("data-track-id");
-  if (id) createdTrackIds.push(id);
+  await expect(rows.first()).toBeVisible({ timeout: 20000 });
+  // Recorded before the count assertion so afterEach always cleans them up.
+  createdTrackIds.push(
+    ...(
+      await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-track-id") ?? ""))
+    ).filter(Boolean),
+  );
+  await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("un");
 });

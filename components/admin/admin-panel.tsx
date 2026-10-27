@@ -20,6 +20,7 @@ import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
 import type { CollectResult, DroppedFile } from "@/lib/drop-entries";
 import * as adminApi from "@/lib/admin-api";
 import {
+  BATCH_MAX,
   INBOX_LABEL,
   batchResultLabel,
   buildFolderPathLabel,
@@ -44,6 +45,8 @@ const GENERIC_ERROR = "Action impossible";
 
 const errorMessage = (error: unknown) =>
   error instanceof Error && error.message ? error.message : GENERIC_ERROR;
+
+const SELECTION_LIMIT_NOTICE = `Sélection limitée à ${BATCH_MAX} titres`;
 
 const itemsLabel = (count: number) => (count === 1 ? "1 élément" : `${count} éléments`);
 
@@ -137,6 +140,10 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       showError(new Error("Trop de fichiers (500 max)"));
       return;
     }
+    if (result.files.length === 0) {
+      setBanner({ text: "Aucun fichier audio trouvé", tone: "notice" });
+      return;
+    }
     void imports.addEntries(result.files as DroppedFile<File>[], folderId);
   };
 
@@ -218,6 +225,12 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
 
   const toggleTrack = (id: string, shiftKey: boolean) => {
     const next = new Set(selectedIds);
+    let limited = false;
+    const add = (trackId: string) => {
+      if (next.has(trackId)) return;
+      if (next.size >= BATCH_MAX) limited = true;
+      else next.add(trackId);
+    };
     const from = lastToggled.current;
     const fromIndex = from === null ? -1 : visibleTracks.findIndex((t) => t.id === from);
     const toIndex = visibleTracks.findIndex((t) => t.id === id);
@@ -226,22 +239,27 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       const on = !selectedIds.has(id);
       const [lo, hi] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
       for (const track of visibleTracks.slice(lo, hi + 1)) {
-        if (on) next.add(track.id);
+        if (on) add(track.id);
         else next.delete(track.id);
       }
     } else if (next.has(id)) next.delete(id);
-    else next.add(id);
+    else add(id);
     lastToggled.current = id;
     setTicked(next);
+    if (limited) setBanner({ text: SELECTION_LIMIT_NOTICE, tone: "notice" });
   };
 
   const toggleAll = () => {
     lastToggled.current = null;
-    setTicked(
-      selectedIds.size === visibleTracks.length
-        ? new Set()
-        : new Set(visibleTracks.map((track) => track.id)),
-    );
+    const cap = Math.min(visibleTracks.length, BATCH_MAX);
+    if (selectedIds.size >= cap) {
+      setTicked(new Set());
+      return;
+    }
+    setTicked(new Set(visibleTracks.slice(0, BATCH_MAX).map((track) => track.id)));
+    if (visibleTracks.length > BATCH_MAX) {
+      setBanner({ text: SELECTION_LIMIT_NOTICE, tone: "notice" });
+    }
   };
 
   const clearSelection = () => {
@@ -250,14 +268,23 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   };
 
   const batchUpdate = async (patch: adminApi.BatchTrackPatch) => {
+    let failedIds: string[] = [];
     const ok = await run(async () => {
       const result = await adminApi.batchUpdateTracks([...selectedIds], patch);
+      failedIds = result.failed ?? [];
       setBanner({
-        text: batchResultLabel({ updated: result.updated.length, missing: result.missing.length }),
+        text: batchResultLabel({
+          updated: result.updated.length,
+          missing: result.missing.length,
+          failed: failedIds.length,
+        }),
         tone: "notice",
       });
     });
-    if (ok) clearSelection();
+    if (!ok) return ok;
+    // Tracks that failed stay ticked so the action can be retried on them.
+    if (failedIds.length > 0) setTicked(new Set(failedIds));
+    else clearSelection();
     return ok;
   };
 

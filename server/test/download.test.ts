@@ -58,6 +58,8 @@ describe("downloadToFile", () => {
       "https://user:pw@example.com/a",
       "https://93.184.216.34/a",
       "https://[2606:4700::1]/a",
+      "https://example.com:8443/a",
+      "https://example.com:80/a",
       "not a url",
     ]) {
       assert.deepEqual(await downloadToFile(url, dest, o), { ok: false, detail: "forbidden_host" });
@@ -221,5 +223,70 @@ describe("downloadToFile", () => {
     );
     assert.deepEqual(result, { ok: false, detail: "timeout" });
     assert.equal(existsSync(dest), false);
+  });
+
+  it("accepts an explicit :443", async () => {
+    const result = await downloadToFile(
+      "https://example.com:443/a",
+      dest,
+      opts(() => new Response("ok")),
+    );
+    assert.deepEqual(result, { ok: true, bytes: 2 });
+  });
+
+  it("times out when no chunk arrives for the idle delay", async () => {
+    const result = await downloadToFile(
+      "https://example.com/a",
+      dest,
+      opts(
+        (_url, init) => {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(10));
+              init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+            },
+          });
+          return new Response(body);
+        },
+        { idleTimeoutMs: 30 },
+      ),
+    );
+    assert.deepEqual(result, { ok: false, detail: "timeout" });
+    assert.equal(existsSync(dest), false);
+  });
+
+  it("does not trip the idle timeout while chunks keep coming", async () => {
+    const result = await downloadToFile(
+      "https://example.com/a",
+      dest,
+      opts(
+        () => {
+          let sent = 0;
+          const body = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              await new Promise((resolve) => setTimeout(resolve, 15));
+              controller.enqueue(new Uint8Array(10));
+              sent += 1;
+              if (sent === 6) controller.close();
+            },
+          });
+          return new Response(body);
+        },
+        { idleTimeoutMs: 80 },
+      ),
+    );
+    assert.deepEqual(result, { ok: true, bytes: 60 });
+  });
+
+  it("aborts a resolver that never answers once the deadline passes", async () => {
+    const result = await downloadToFile(
+      "https://example.com/a",
+      dest,
+      opts(() => new Response("x"), {
+        resolve: () => new Promise<string[]>(() => {}),
+        timeoutMs: 30,
+      }),
+    );
+    assert.deepEqual(result, { ok: false, detail: "timeout" });
   });
 });

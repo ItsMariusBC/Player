@@ -163,6 +163,12 @@ export function metadataResultsNotice(results: MetadataResults): string | null {
   return null;
 }
 
+/**
+ * Most tracks a batch action takes. Mirrors BATCH_MAX in server/src/routes/admin-tracks.ts:
+ * keep the two values equal.
+ */
+export const BATCH_MAX = 200;
+
 /** "1 titre sélectionné" / "n titres sélectionnés". */
 export function selectionLabel(count: number): string {
   return count === 1 ? "1 titre sélectionné" : `${count} titres sélectionnés`;
@@ -173,11 +179,17 @@ export function batchResultLabel(result: {
   updated?: number;
   deleted?: number;
   missing: number;
+  failed?: number;
 }): string {
   const done = result.deleted ?? result.updated ?? 0;
   const plural = done > 1;
   const verb = result.deleted === undefined ? "mis à jour" : plural ? "supprimés" : "supprimé";
   const base = `${done} titre${plural ? "s" : ""} ${verb}`;
-  if (result.missing <= 0) return base;
-  return `${base}, ${result.missing} introuvable${result.missing > 1 ? "s" : ""}`;
+  let label = base;
+  if (result.missing > 0) {
+    label += `, ${result.missing} introuvable${result.missing > 1 ? "s" : ""}`;
+  }
+  const failed = result.failed ?? 0;
+  if (failed > 0) label += `, ${failed} échec${failed > 1 ? "s" : ""}`;
+  return label;
 }

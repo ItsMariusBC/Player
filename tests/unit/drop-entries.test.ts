@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { type DropEntry, collectDroppedFiles, fromFileList } from "../../lib/drop-entries";
+import {
+  type DropEntry,
+  MAX_DROP_VISITS,
+  collectDroppedFiles,
+  fromFileList,
+} from "../../lib/drop-entries";
 
 const file = (name: string): DropEntry => ({
   isFile: true,
@@ -72,6 +77,26 @@ describe("collectDroppedFiles", () => {
     expect(result).toEqual({ files: [], tooMany: true });
   });
 
+  test("flags too many visited entries, audio or not", async () => {
+    const children = Array.from({ length: 5 }, (_, i) => file(`${i}.txt`));
+    const result = await collectDroppedFiles([dir("D", [file("a.mp3"), ...children])], {
+      maxVisits: 4,
+    });
+    expect(result).toEqual({ files: [], tooMany: true });
+  });
+
+  test("accepts exactly maxVisits entries", async () => {
+    const result = await collectDroppedFiles([dir("D", [file("a.mp3"), file("b.txt")])], {
+      maxVisits: 3,
+    });
+    expect(result.tooMany).toBe(false);
+    expect(names(result)).toEqual(["D/a.mp3"]);
+  });
+
+  test("exports the default visit budget", () => {
+    expect(MAX_DROP_VISITS).toBe(10_000);
+  });
+
   test("accepts exactly maxFiles", async () => {
     const children = Array.from({ length: 3 }, (_, i) => file(`${i}.mp3`));
     const result = await collectDroppedFiles([dir("D", children)], { maxFiles: 3 });
@@ -96,6 +121,15 @@ describe("fromFileList", () => {
     const result = fromFileList([f("a.mp3", ""), f("c.jpg", "A/c.jpg"), f("h.mp3", "A/.x/h.mp3")]);
     expect(result.files.map((x) => x.file.name)).toEqual(["a.mp3"]);
     expect(result.files[0]?.path).toEqual([]);
+  });
+
+  test("skips files deeper than maxDepth", () => {
+    const deep = f("d.mp3", "a/b/c/d.mp3");
+    const ok = f("k.mp3", "a/b/k.mp3");
+    const result = fromFileList([deep, ok], { maxDepth: 2 });
+    expect(result.files.map((x) => x.file.name)).toEqual(["k.mp3"]);
+    expect(fromFileList([f("n.mp3", "1/2/3/4/5/6/7/8/n.mp3")]).files).toHaveLength(1);
+    expect(fromFileList([f("n.mp3", "1/2/3/4/5/6/7/8/9/n.mp3")]).files).toHaveLength(0);
   });
 
   test("flags too many files", () => {

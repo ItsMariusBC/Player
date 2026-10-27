@@ -30,6 +30,8 @@ export interface DownloadOptions {
   /** Whole download, redirects included (default 15 min). */
   timeoutMs?: number;
   maxRedirects?: number;
+  /** Abort when no body chunk arrives for this long (default 30 s). */
+  idleTimeoutMs?: number;
   userAgent?: string;
 }
 
@@ -44,14 +46,28 @@ class Refused extends Error {
   }
 }
 
-async function checkTarget(url: URL, resolve: DownloadOptions["resolve"]): Promise<void> {
+async function checkTarget(
+  url: URL,
+  resolve: DownloadOptions["resolve"],
+  signal: AbortSignal,
+): Promise<void> {
   if (url.protocol !== "https:") throw new Refused("forbidden_host");
+  if (url.port !== "" && url.port !== "443") throw new Refused("forbidden_host");
   if (url.username || url.password) throw new Refused("forbidden_host");
   if (isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0) throw new Refused("forbidden_host");
   let addresses: string[];
   try {
-    addresses = await resolve(url.hostname);
+    // A resolver that hangs must not outlive the deadline: race it against the abort signal.
+    addresses = await Promise.race([
+      resolve(url.hostname),
+      new Promise<never>((_, reject) => {
+        if (signal.aborted) reject(new Error("aborted"));
+        else signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      }),
+    ]);
   } catch {
+    // An abort is reported by the caller (timeout), not as an unreachable host.
+    if (signal.aborted) throw new Error("aborted");
     throw new Refused("unreachable");
   }
   if (addresses.length === 0) throw new Refused("unreachable");
@@ -59,7 +75,14 @@ async function checkTarget(url: URL, resolve: DownloadOptions["resolve"]): Promi
 }
 
 /** Streams the body to dest, failing once it passes maxBytes. */
-async function streamToFile(res: Response, dest: string, maxBytes: number): Promise<number> {
+async function streamToFile(
+  res: Response,
+  dest: string,
+  maxBytes: number,
+  idleMs: number,
+  onIdle: () => void,
+  signal: AbortSignal,
+): Promise<number> {
   const announced = Number(res.headers.get("content-length"));
   if (res.headers.has("content-length") && Number.isFinite(announced) && announced > maxBytes) {
     await res.body?.cancel().catch(() => {});
@@ -67,18 +90,26 @@ async function streamToFile(res: Response, dest: string, maxBytes: number): Prom
   }
   if (!res.body) throw new Refused("unreachable");
   let total = 0;
+  let idle = setTimeout(onIdle, idleMs);
   const counter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
+      clearTimeout(idle);
+      idle = setTimeout(onIdle, idleMs);
       total += chunk.length;
       if (total > maxBytes) callback(new Refused("too_large"));
       else callback(null, chunk);
     },
   });
-  await pipeline(
-    Readable.fromWeb(res.body as NodeWebStream<Uint8Array>),
-    counter,
-    createWriteStream(dest),
-  );
+  try {
+    await pipeline(
+      Readable.fromWeb(res.body as NodeWebStream<Uint8Array>),
+      counter,
+      createWriteStream(dest),
+      { signal },
+    );
+  } finally {
+    clearTimeout(idle);
+  }
   return total;
 }
 
@@ -112,7 +143,7 @@ export async function downloadToFile(
     }
     let redirects = 0;
     for (;;) {
-      await checkTarget(current, opts.resolve);
+      await checkTarget(current, opts.resolve, controller.signal);
       connect = setTimeout(abort, opts.connectTimeoutMs ?? 20_000);
       let res: Response;
       try {
@@ -137,7 +168,17 @@ export async function downloadToFile(
         await res.body?.cancel().catch(() => {});
         throw new Refused(`http_${res.status}`);
       }
-      return { ok: true, bytes: await streamToFile(res, dest, opts.maxBytes) };
+      return {
+        ok: true,
+        bytes: await streamToFile(
+          res,
+          dest,
+          opts.maxBytes,
+          opts.idleTimeoutMs ?? 30_000,
+          abort,
+          controller.signal,
+        ),
+      };
     }
   } catch (error) {
     await rm(dest, { force: true }).catch(() => {});

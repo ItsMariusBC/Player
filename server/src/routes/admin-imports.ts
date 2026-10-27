@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import { isIP } from "node:net";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { ImportQueue } from "../admin/imports.ts";
+import { MAX_PROCESSING_IMPORTS, type ImportQueue } from "../admin/imports.ts";
 import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import type { AppConfig } from "../config.ts";
 import { jsonError } from "../http.ts";
@@ -61,7 +61,17 @@ export function adminImportRoutes(
   const folderExists = (id: string) =>
     deps.db.prepare("SELECT 1 FROM folders WHERE id = ?").get(id) !== undefined;
 
+  const tooManyImports = () => {
+    const { n } = deps.db
+      .prepare("SELECT COUNT(*) AS n FROM imports WHERE state = 'processing'")
+      .get() as unknown as { n: number };
+    return n >= MAX_PROCESSING_IMPORTS;
+  };
+
   routes.post("/", async (c) => {
+    if (tooManyImports()) {
+      return jsonError(c, 429, "too_many_imports", "Too many imports are already in progress");
+    }
     const importId = crypto.randomUUID();
     const dir = deps.storage.incomingDir(importId);
     const { outcome, filename, folderId } = await receive(
@@ -103,6 +113,9 @@ export function adminImportRoutes(
     } | null;
     if (!body || typeof body !== "object") return jsonError(c, 400, "bad_request", "Invalid body");
     const { url: raw, folderId } = body;
+    if (tooManyImports()) {
+      return jsonError(c, 429, "too_many_imports", "Too many imports are already in progress");
+    }
     if (typeof raw !== "string" || raw.length === 0 || raw.length > MAX_URL_LENGTH) {
       return jsonError(c, 400, "bad_request", "Invalid url");
     }
@@ -114,6 +127,9 @@ export function adminImportRoutes(
     }
     if (url.protocol !== "https:" || isIP(url.hostname.replace(/^\[|\]$/g, "")) !== 0) {
       return jsonError(c, 400, "bad_request", "Only https URLs with a host name are accepted");
+    }
+    if (url.port !== "" && url.port !== "443") {
+      return jsonError(c, 400, "bad_request", "Only the default https port is accepted");
     }
     if (folderId !== undefined && folderId !== null) {
       if (typeof folderId !== "string" || !folderExists(folderId)) {

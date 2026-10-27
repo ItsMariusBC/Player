@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { MAX_PROCESSING_IMPORTS } from "../src/admin/imports.ts";
 import { createTestApp } from "./helpers.ts";
 import { writeWav } from "./fixtures.ts";
 
@@ -63,6 +64,8 @@ describe("POST /api/admin/imports/url", () => {
       { url: "ftp://example.com/a.wav" },
       { url: "https://93.184.216.34/a.wav" },
       { url: "https://[2606:4700::1]/a.wav" },
+      { url: "https://example.com:8443/a.wav" },
+      { url: "https://example.com:80/a.wav" },
       { url: `https://example.com/${"a".repeat(2048)}` },
       { url: "https://example.com/a.wav", folderId: "missing" },
       { url: "https://example.com/a.wav", folderId: 4 },
@@ -255,5 +258,32 @@ describe("POST /api/admin/imports/url", () => {
     // The three downloads serve the same file: one track, two duplicates.
     assert.equal(states.filter((s) => s.state === "ready").length, 1);
     assert.equal(states.filter((s) => s.state === "failed").length, 2);
+  });
+
+  it("answers 429 too_many_imports once 50 imports are processing (URL and upload)", async () => {
+    t = createTestApp({ download: { fetch: async () => wavResponse() } });
+    const cookie = t.loginAs("admin");
+    const user = (t.db.prepare("SELECT id FROM users LIMIT 1").get() as { id: string }).id;
+    const insert = t.db.prepare(
+      "INSERT INTO imports (id, user_id, filename, state, error, created_at, updated_at) VALUES (?, ?, 'a.wav', ?, NULL, 'x', 'x')",
+    );
+    // Finished imports do not count.
+    insert.run("done", user, "ready");
+    for (let n = 0; n < MAX_PROCESSING_IMPORTS - 1; n += 1) insert.run(`p${n}`, user, "processing");
+    const first = await post(cookie, { url: "https://example.com/a.wav" });
+    assert.equal(first.status, 202);
+    const second = await post(cookie, { url: "https://example.com/b.wav" });
+    assert.equal(second.status, 429);
+    assert.equal(((await second.json()) as any).error.code, "too_many_imports");
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(wav)]), "song.wav");
+    const upload = await t.app.request("/api/admin/imports", {
+      method: "POST",
+      body: form,
+      headers: { cookie, "X-Requested-With": "player" },
+    });
+    assert.equal(upload.status, 429);
+    assert.equal(((await upload.json()) as any).error.code, "too_many_imports");
+    await t.imports.idle();
   });
 });

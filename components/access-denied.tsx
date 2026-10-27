@@ -4,12 +4,15 @@ import { buttonVariants } from "@/components/ui/button";
 import { performLogout } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
-export function AccessDenied() {
+export function AccessDenied({ displayName }: { displayName?: string | null }) {
   return (
     <main className="flex min-h-svh items-center justify-center px-6 text-purple-100">
       <div className="text-center">
         <h1 className="text-2xl font-semibold">Accès refusé</h1>
         <p className="mt-3 text-purple-200">Ton compte n'appartient à aucun groupe autorisé.</p>
+        <p className="mt-2 text-sm text-purple-300">
+          Connecté en tant que {displayName || "compte sans nom"}
+        </p>
         <button
           type="button"
           className={cn(buttonVariants({ variant: "ghost" }), "mt-6")}

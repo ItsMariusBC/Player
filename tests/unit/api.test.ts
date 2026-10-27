@@ -70,3 +70,14 @@ describe("fetchDevBypassStatus", () => {
     expect(await fetchDevBypassStatus()).toBe(true);
   });
 });
+
+describe("api error details", () => {
+  test("ApiError keeps the parsed body as details", async () => {
+    stubFetch(403, {
+      error: { code: "no_group", message: "no" },
+      user: { displayName: "Nobody Test" },
+    });
+    const err = (await api("/api/session").catch((e: unknown) => e)) as ApiError;
+    expect((err.details as { user: { displayName: string } }).user.displayName).toBe("Nobody Test");
+  });
+});

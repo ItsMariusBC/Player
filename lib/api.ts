@@ -5,6 +5,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -27,14 +28,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     let code = response.status === 401 ? "session_required" : "request_failed";
     let message = response.statusText || "Request failed";
+    let details: unknown;
     try {
       const body = (await response.json()) as { error?: { code?: string; message?: string } };
+      details = body;
       if (body.error?.code) code = body.error.code;
       if (body.error?.message) message = body.error.message;
     } catch {
       // Non-JSON error body: keep the defaults.
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(response.status, code, message, details);
   }
 
   try {

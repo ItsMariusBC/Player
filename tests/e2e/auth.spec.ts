@@ -51,6 +51,7 @@ test("account without access gets the denied screen", async ({ page }) => {
   await loginAs(page, "nobody@test");
 
   await expect(page.getByText("Accès refusé")).toBeVisible();
+  await expect(page.getByText("Nobody Test")).toBeVisible();
   await expect(page.locator('button[aria-label="Agrandir le visualiseur"]')).toHaveCount(0);
 });
 

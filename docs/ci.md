@@ -71,7 +71,7 @@ En mode `production` (valeur par défaut de l'image), `APP_URL` et `OIDC_ISSUER`
 
 ### HTTPS et reverse proxy
 
-Le TLS est terminé par le reverse proxy (Dokploy, Traefik). `TRUST_PROXY=true` se définit derrière le reverse proxy qui termine le HTTPS, pour que les en-têtes `X-Forwarded-*` soient pris en compte ; et garder `APP_URL` en `https://`. Aucun port hôte n'est publié par le Compose de production.
+Le TLS est terminé par le reverse proxy (Dokploy, Traefik). Le serveur déduit toutes ses URL et l'attribut `Secure` du cookie de `APP_URL` (à garder en `https://`) et ne lit jamais les en-têtes `X-Forwarded-*`. `TRUST_PROXY` est réservé à un usage ultérieur (adresse IP du client pour la limitation de débit) et ne change rien aujourd'hui. Aucun port hôte n'est publié par le Compose de production.
 
 ### Pré-requis Authentik
 

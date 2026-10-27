@@ -28,7 +28,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (state.status === "denied") return <AccessDenied />;
+  if (state.status === "denied") return <AccessDenied displayName={state.displayName} />;
   if (state.status === "bypass") return <DevLogin onDone={state.refresh} />;
   if (state.status === "error") {
     return <SessionError message={state.message} onRetry={() => void state.refresh()} />;

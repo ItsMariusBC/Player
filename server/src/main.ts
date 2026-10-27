@@ -4,6 +4,7 @@ import { createApp } from "./app.ts";
 import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
+import { createImportQueue } from "./admin/imports.ts";
 import { createMediaStorage } from "./media/storage.ts";
 import { migrate } from "./migrations.ts";
 import { retry } from "./retry.ts";
@@ -55,11 +56,13 @@ async function discoverOidc() {
 
 const oidc = await discoverOidc();
 
+const storage = createMediaStorage(config.dataDir);
 const app = createApp({
   config,
   db,
   oidc,
-  storage: createMediaStorage(config.dataDir),
+  storage,
+  imports: createImportQueue({ db, storage, log }),
   staticDir: "dist",
   log,
 });

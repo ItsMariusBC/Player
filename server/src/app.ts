@@ -3,6 +3,8 @@ import type { MiddlewareHandler } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
+import type { ImportQueue } from "./admin/imports.ts";
+import { adminImportRoutes } from "./routes/admin-imports.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
 import { jsonError } from "./http.ts";
@@ -17,6 +19,7 @@ export interface AppDeps {
   db: DatabaseSync;
   oidc: OidcAdapter;
   storage: MediaStorage;
+  imports: ImportQueue;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -67,6 +70,8 @@ export function createApp(deps: AppDeps) {
 
   app.route("/api/catalog", catalogRoutes(deps, session));
   app.route("/api/media", mediaRoutes(deps, session));
+
+  app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
 
   deps.mount?.(app, session);
 

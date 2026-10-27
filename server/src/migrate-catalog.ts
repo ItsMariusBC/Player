@@ -3,9 +3,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { createFolder, listFolders } from "./catalog/folders.ts";
-import { findTrackBySha, insertTrack } from "./catalog/tracks.ts";
 import { openDatabase } from "./db.ts";
-import { probeFile, type ProbeResult } from "./media/probe.ts";
+import { ingestFile } from "./media/ingest.ts";
+import type { ProbeResult } from "./media/probe.ts";
 import { createMediaStorage, type MediaStorage } from "./media/storage.ts";
 import { migrate } from "./migrations.ts";
 
@@ -121,38 +121,26 @@ export async function migrateCatalog(input: {
       const dir = storage.incomingDir(importId);
       const copy = path.join(dir, "source");
       await copyFile(path.join(sourceDir, file), copy);
-      const probe = await probeFile(copy);
-      if (findTrackBySha(db, probe.sha256)) {
-        await storage.removeIncoming(importId);
+      const folderPath = entry?.folder ?? path.dirname(file).split(path.sep).join("/");
+      const result = await ingestFile({
+        db,
+        storage,
+        importId,
+        file: copy,
+        title: entry?.name,
+        artist: entry?.author,
+        fallbackTitle: path.basename(file, path.extname(file)),
+        folderId: folderPath === "." ? null : resolveFolder(folderPath),
+        cover: await readPicture(sourceDir, entry?.picture),
+        now,
+      });
+      if (result.kind === "duplicate") {
         report.skipped += 1;
         continue;
       }
-      const folderPath = entry?.folder ?? path.dirname(file).split(path.sep).join("/");
-      const folderId = folderPath === "." ? null : resolveFolder(folderPath);
-      const cover = (await readPicture(sourceDir, entry?.picture)) ?? probe.cover;
-      const trackId = crypto.randomUUID();
-      await storage.publish(importId, trackId, copy, probe.format, cover);
-      try {
-        insertTrack(
-          db,
-          {
-            id: trackId,
-            folderId,
-            title: entry?.name ?? probe.title ?? path.basename(file, path.extname(file)),
-            artist: entry?.author ?? probe.artist ?? "",
-            album: probe.album ?? "",
-            durationMs: probe.durationMs,
-            format: probe.format,
-            sizeBytes: probe.sizeBytes,
-            sha256: probe.sha256,
-            coverExt: cover?.ext ?? null,
-            status: "ready",
-          },
-          now,
-        );
-      } catch (error) {
-        await storage.removeTrack(trackId);
-        throw error;
+      if (result.kind === "unsupported") {
+        report.failed.push({ file, reason: "unsupported_format" });
+        continue;
       }
       report.imported += 1;
     } catch (error) {

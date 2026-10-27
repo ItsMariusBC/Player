@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { createImportQueue } from "../src/admin/imports.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
@@ -61,15 +62,18 @@ export function createTestApp(opts: TestAppOptions = {}) {
   };
 
   const log: LogEntry[] = [];
+  const logger = (event: string, data?: Record<string, unknown>) => log.push({ event, data });
+  const imports = createImportQueue({ db, storage, log: logger, now: clock });
   const app = createApp({
     config,
     db,
     oidc,
     storage,
+    imports,
     now: clock,
     staticDir: opts.staticDir,
     mount: opts.mount,
-    log: (event, data) => log.push({ event, data }),
+    log: logger,
   });
 
   /** Creates the user and a session directly in the database, returns the Cookie header value. */
@@ -109,6 +113,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     db,
     oidc,
     storage,
+    imports,
     tempDir,
     cleanup,
     accounts,

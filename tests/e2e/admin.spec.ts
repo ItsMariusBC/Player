@@ -24,7 +24,8 @@ function freshWav(): Buffer {
   return Buffer.concat([header, data]);
 }
 
-const unique = (prefix: string) => `${prefix}-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
+const unique = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
 async function openAdmin(page: Page) {
   await loginAs(page, "admin@test");
@@ -63,14 +64,18 @@ async function closePanel(page: Page) {
   await expect(page.getByRole("dialog", { name: "Administration" })).toHaveCount(0);
 }
 
-test("admin imports a track, files it in a new folder and finds it in the queue", async ({ page }) => {
+test("admin imports a track, files it in a new folder and finds it in the queue", async ({
+  page,
+}) => {
   const dialog = await openAdmin(page);
   const folder = unique("Test");
 
   await dialog.getByRole("button", { name: "+ Nouveau dossier" }).click();
   await dialog.getByRole("textbox", { name: "Nom du nouveau dossier" }).fill(folder);
   await page.keyboard.press("Enter");
-  const folderRow = dialog.getByRole("navigation", { name: "Dossiers" }).getByRole("button", { name: folder });
+  const folderRow = dialog
+    .getByRole("navigation", { name: "Dossiers" })
+    .getByRole("button", { name: folder });
   await expect(folderRow).toBeVisible();
 
   const { id } = await importTrack(page);

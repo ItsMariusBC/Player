@@ -29,7 +29,13 @@ Le catalogue vit dans le dossier de données de l'API (`DATA_DIR`) et n'est plus
 DATA_DIR=./.data yarn migrate:catalog <dossier-de-musique> [--manifest <fichier.json>]
 ```
 
-Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`.
+Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`. Les scénarios du panneau d'administration (`tests/e2e/admin.spec.ts`) se connectent avec `admin@test` et `user@test` via le fournisseur factice ; ils tournent avec `yarn test:e2e`.
+
+## Administration
+
+Les membres du groupe `admin` voient un bouton à côté de la déconnexion, qui ouvre le panneau d'administration du catalogue : créer, renommer, déplacer et supprimer des dossiers ; importer des fichiers FLAC, MP3 ou WAV (clic ou glisser-déposer, traités l'un après l'autre côté serveur) ; modifier titre, artiste, album, dossier et pochette ; compléter un titre depuis des bases libres (MusicBrainz, Deezer, iTunes). Les membres du groupe `users` n'ont que la lecture : `/api/admin/*` leur répond 403.
+
+Les modifications de titre, d'artiste et d'album sont aussi écrites dans les tags du fichier, au mieux : MP3 et FLAC oui, WAV jamais (le catalogue reste la référence). Une panne de l'écriture de tags n'annule pas la modification. La taille maximale d'un import se règle avec `MAX_UPLOAD_MB` (200 par défaut). La recherche de métadonnées demande une sortie HTTPS du serveur vers les fournisseurs ; sans elle, le reste fonctionne. Détails des routes et des couches dans [docs/architecture.md](docs/architecture.md), exploitation dans [docs/ci.md](docs/ci.md).
 
 ## Branches et livraison
 

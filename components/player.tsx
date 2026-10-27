@@ -14,6 +14,7 @@ import { AnimatePresence, LazyMotion, MotionConfig, m } from "framer-motion";
 const loadMotionFeatures = () => import("@/lib/motion-features").then((mod) => mod.default);
 import { NowPlaying } from "@/components/now-playing";
 import { SongList } from "@/components/song-list";
+import { SongRequestDialog } from "@/components/song-request-dialog";
 import { MiniPlayer } from "@/components/mini-player";
 import { UpNext } from "@/components/up-next";
 import { ProgressBar } from "@/components/progress-bar";
@@ -35,6 +36,7 @@ export default function MusicPlayer() {
   // Admin panel: unmounts the rest of the UI the same way.
   const { role } = useSessionInfo();
   const [adminOpen, setAdminOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
   const focusMode = visualizerExpanded || adminOpen;
   // Server catalogue. `queued` is the catalogue currently loaded in the queue:
@@ -190,8 +192,17 @@ export default function MusicPlayer() {
               </div>
               
               <div className="md:col-span-4">
-                <div className="bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px] overflow-y-auto">
-                  <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
+                <div className="flex flex-col bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px]">
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
+                  </div>
+                  <button
+                    type="button"
+                    className={cn(buttonVariants({ variant: "ghost" }), "shrink-0 w-full mt-3")}
+                    onClick={() => setRequestOpen(true)}
+                  >
+                    Demander un son
+                  </button>
                 </div>
               </div>
             </div>
@@ -223,6 +234,7 @@ export default function MusicPlayer() {
             </>
           )}
           <ProgressBar music={runtime.music} playback={runtime.playback} />
+          {requestOpen && !focusMode && <SongRequestDialog onClose={() => setRequestOpen(false)} />}
 
           {/* Mini-player */}
           <AnimatePresence>

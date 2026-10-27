@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { listFolders } from "../src/catalog/folders.ts";
-import { listTracks } from "../src/catalog/tracks.ts";
+import { insertTrack, listTracks } from "../src/catalog/tracks.ts";
 import { openDatabase } from "../src/db.ts";
+import { probeFile } from "../src/media/probe.ts";
 import { createMediaStorage } from "../src/media/storage.ts";
 import { migrate } from "../src/migrations.ts";
 import { migrateCatalog } from "../src/migrate-catalog.ts";
@@ -97,5 +106,72 @@ describe("migrateCatalog", () => {
       .sort((x, y) => x.position - y.position)
       .map((t) => t.title);
     assert.deepEqual(titles, ["C", "a", "b"]);
+  });
+
+  const incomingEmpty = () => {
+    const dir = path.join(root, "data", "incoming");
+    return !existsSync(dir) || readdirSync(dir).length === 0;
+  };
+
+  it("leaves incoming empty after a failure and a skipped duplicate", async () => {
+    writeFileSync(path.join(source, "bad.mp3"), "not audio");
+    writeWav(path.join(source, "a.wav"), 1);
+    await run();
+    const report = await run();
+    assert.equal(report.skipped, 1);
+    assert.equal(report.failed.length, 1);
+    assert.ok(incomingEmpty());
+  });
+
+  it("skips a file whose sha is already catalogued", async () => {
+    writeWav(path.join(source, "a.wav"), 1);
+    const probe = await probeFile(path.join(source, "a.wav"));
+    insertTrack(
+      db,
+      {
+        id: crypto.randomUUID(),
+        folderId: null,
+        title: "pre",
+        artist: "",
+        album: "",
+        durationMs: 1000,
+        format: "wav",
+        sizeBytes: probe.sizeBytes,
+        sha256: probe.sha256,
+        coverExt: null,
+        status: "ready",
+      },
+      now,
+    );
+    assert.deepEqual(await run(), { imported: 0, skipped: 1, failed: [] });
+  });
+
+  it("reports an insert failure, removes its media and keeps going", async () => {
+    writeWav(path.join(source, "a.wav"), 1);
+    writeWav(path.join(source, "b.wav"), 2);
+    writeWav(path.join(source, "c.wav"), 3);
+    db.exec(
+      "CREATE TRIGGER boom BEFORE INSERT ON tracks WHEN NEW.title = 'b' BEGIN SELECT RAISE(ABORT, 'boom'); END",
+    );
+    const report = await run();
+    db.exec("DROP TRIGGER boom");
+    assert.equal(report.imported, 2);
+    assert.equal(report.failed.length, 1);
+    assert.equal(report.failed[0]!.file, "b.wav");
+    assert.notEqual(report.failed[0]!.reason, "");
+    const ids = listTracks(db).map((t) => t.id);
+    assert.equal(ids.length, 2);
+    const mediaDirs = readdirSync(path.join(root, "data", "media"));
+    assert.deepEqual(mediaDirs.sort(), [...ids].sort());
+    assert.ok(incomingEmpty());
+  });
+
+  it("ignores a manifest picture outside the source directory", async () => {
+    writeWav(path.join(source, "a.wav"), 1);
+    writeFileSync(path.join(root, "outside.jpg"), "secret");
+    await run([{ name: "A", author: "", url: "/a.wav", picture: "../outside.jpg" }]);
+    const [track] = listTracks(db);
+    assert.equal(track!.title, "A");
+    assert.equal(track!.coverExt, null);
   });
 });

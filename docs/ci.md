@@ -94,10 +94,10 @@ Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/au
 
 ### Migration du catalogue
 
-Le script importe un dossier de fichiers audio existant (récursif) dans le catalogue, sans jamais modifier ni supprimer les fichiers sources. Les sous-dossiers deviennent des dossiers du catalogue ; le manifeste (`music/data.json`) fournit titre, artiste, dossier et pochette. Sauvegarder d'abord le volume `/data`. Copier `music/data.json` à côté des médias, puis :
+Le script importe un dossier de fichiers audio existant (récursif) dans le catalogue, sans jamais modifier ni supprimer les fichiers sources. Les sous-dossiers deviennent des dossiers du catalogue ; le manifeste (`music/data.json`) fournit titre, artiste, dossier et pochette. Sauvegarder d'abord le volume `/data`. Les sources et le manifeste sont montés en lecture seule :
 
 ```
-docker compose run --rm -v ./public:/import player node dist/server/migrate-catalog.js /import --manifest /import/data.json
+docker compose run --rm -v ./public:/import:ro -v ./music/data.json:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
 ```
 
 En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué.

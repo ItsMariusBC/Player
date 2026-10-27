@@ -31,11 +31,11 @@ Le catalogue vit dans le dossier de données de l'API (`DATA_DIR`) et n'est plus
 DATA_DIR=./.data yarn migrate:catalog <dossier-de-musique> [--manifest <fichier.json>]
 ```
 
-Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`. Les scénarios du panneau d'administration (`tests/e2e/admin.spec.ts`) et des demandes de sons (`tests/e2e/requests.spec.ts`) se connectent avec `admin@test` et `user@test` via le fournisseur factice ; ils tournent avec `yarn test:e2e`.
+Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`. Les scénarios du panneau d'administration (`tests/e2e/admin.spec.ts`, `tests/e2e/admin-batch.spec.ts`) et des demandes de sons (`tests/e2e/requests.spec.ts`) se connectent avec `admin@test` et `user@test` via le fournisseur factice ; ils tournent avec `yarn test:e2e`.
 
 ## Administration
 
-Les membres du groupe `admin` voient un bouton à côté de la déconnexion, qui ouvre le panneau d'administration du catalogue : créer, renommer, déplacer et supprimer des dossiers ; importer des fichiers FLAC, MP3 ou WAV (clic ou glisser-déposer, traités l'un après l'autre côté serveur) ; modifier titre, artiste, album, dossier et pochette ; compléter un titre depuis des bases libres (MusicBrainz, Deezer, iTunes). Les membres du groupe `users` n'ont que la lecture : `/api/admin/*` leur répond 403.
+Les membres du groupe `admin` voient un bouton à côté de la déconnexion, qui ouvre le panneau d'administration du catalogue : créer, renommer, déplacer et supprimer des dossiers ; importer des fichiers FLAC, MP3 ou WAV (clic ou glisser-déposer, traités l'un après l'autre côté serveur) ; modifier titre, artiste, album, dossier et pochette ; compléter un titre depuis des bases libres (MusicBrainz, Deezer, iTunes). Le panneau permet aussi d'importer un dossier entier (glisser-déposer ou « Importer un dossier »), d'importer par URL https, et d'éditer ou supprimer plusieurs titres à la fois. Les membres du groupe `users` n'ont que la lecture : `/api/admin/*` leur répond 403.
 
 Tout utilisateur connecté peut proposer un titre au catalogue : bouton « Demander un son » sous la file d'attente (recherche chez les fournisseurs ou saisie libre, suivi dans « Mes demandes »). Les administrateurs les traitent dans l'onglet « Demandes » du panneau d'administration (valider ou supprimer).
 

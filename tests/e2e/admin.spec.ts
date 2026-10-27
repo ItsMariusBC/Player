@@ -44,7 +44,7 @@ async function openAdmin(page: Page) {
 async function importTrack(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Administration" });
   const filename = `${unique("e2e")}.wav`;
-  await dialog.locator("input[type=file]").setInputFiles({
+  await dialog.locator("input[type=file][multiple]").setInputFiles({
     name: filename,
     mimeType: "audio/wav",
     buffer: freshWav(),
@@ -77,6 +77,11 @@ test("admin imports a track, files it in a new folder and finds it in the queue"
     .getByRole("navigation", { name: "Dossiers" })
     .getByRole("button", { name: folder });
   await expect(folderRow).toBeVisible();
+  // Imports land in the selected folder: go back to the inbox so the track is filed by hand below.
+  await dialog
+    .getByRole("navigation", { name: "Dossiers" })
+    .getByRole("button", { name: /^Boîte d'arrivée/ })
+    .click();
 
   const { id } = await importTrack(page);
   const row = dialog.locator(`tr[data-track-id="${id}"]`);
@@ -87,7 +92,11 @@ test("admin imports a track, files it in a new folder and finds it in the queue"
 
   await folderRow.click();
   await expect(dialog.locator(`tr[data-track-id="${id}"]`)).toBeVisible();
-  const title = await dialog.locator(`tr[data-track-id="${id}"] td`).nth(1).innerText();
+  const label = await dialog
+    .locator(`tr[data-track-id="${id}"]`)
+    .getByRole("checkbox")
+    .getAttribute("aria-label");
+  const title = (label ?? "").replace(/^Sélectionner /, "");
 
   await closePanel(page);
   const queueFolder = page.getByRole("button", { name: new RegExp(`^${folder}`) });

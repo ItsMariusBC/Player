@@ -132,6 +132,9 @@ Après un déploiement, avec Authentik réel :
 6. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
 7. Supprimer le titre de test et le dossier de test.
 8. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
+9. Après la migration 6 : déposer un dossier contenant des sous-dossiers et des fichiers audio dans la zone de dépôt (ou « Importer un dossier ») : l'arborescence est recréée sous le dossier sélectionné et chaque titre s'y range ; un dossier de plus de 500 fichiers affiche « Trop de fichiers (500 max) » sans rien envoyer.
+10. Importer par URL une adresse locale ou privée (par exemple `https://127.0.0.1/a.mp3` est refusée d'emblée, `https://localhost/a.mp3` échoue) : l'import passe à `failed` avec un message de téléchargement (adresse refusée) ; une URL publique valide vers un WAV ou MP3 donne un titre dans le dossier sélectionné.
+11. Cocher plusieurs titres : « Déplacer vers… » les range dans le dossier choisi, « Artiste… » puis « Appliquer » change l'artiste des deux, « Supprimer » puis « Oui » les retire ; la bannière indique le nombre de titres touchés.
 
 ### Recette des demandes de sons
 

@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState, MouseEventHandler } from "react";
 import { Gradient } from "@/components/gradient";
 import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
 import { useSongGradient } from "@/lib/hooks/use-song-gradient";
+import { useCatalog } from "@/lib/hooks/use-catalog";
+import { type Catalog, flattenCatalog } from "@/lib/catalog";
 import { VisualizerCard, VisualizerStage } from "@/components/visualizer-panel";
 import { AnimatePresence, LazyMotion, MotionConfig, m } from "framer-motion";
 
@@ -35,6 +37,10 @@ export default function MusicPlayer() {
   const [adminOpen, setAdminOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
   const focusMode = visualizerExpanded || adminOpen;
+  // Server catalogue. `queued` is the catalogue currently loaded in the queue:
+  // the player renders only once the first one is in, so no empty-queue flash.
+  const { status: catalogStatus, catalog, error: catalogError, refresh: refreshCatalog } = useCatalog();
+  const [queued, setQueued] = useState<Catalog>();
 
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
@@ -55,6 +61,14 @@ export default function MusicPlayer() {
       player.destroy();
     };
   }, []);
+
+  // Every new catalogue (first load, poll, refresh) replaces the queue; the
+  // queue keeps the current track by id (see QueueManager.setSongs).
+  useEffect(() => {
+    if (!runtime || !catalog) return;
+    runtime.music.queueManager.setSongs(flattenCatalog(catalog));
+    setQueued(catalog);
+  }, [runtime, catalog]);
 
   // Effect pour détecter la première interaction de l'utilisateur
   useEffect(() => {
@@ -103,7 +117,25 @@ export default function MusicPlayer() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [musicManager]);
 
-  if (!runtime) {
+  if (!queued && catalogStatus === "error") {
+    return (
+      <main className="flex min-h-svh items-center justify-center px-6 text-purple-100">
+        <div className="text-center">
+          <h1 className="text-2xl font-semibold">Catalogue indisponible</h1>
+          <p className="mt-3 text-sm text-purple-300/70">{catalogError}</p>
+          <button
+            type="button"
+            className={cn(buttonVariants({ variant: "ghost" }), "mt-6")}
+            onClick={() => void refreshCatalog()}
+          >
+            Réessayer
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (!runtime || !queued) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -146,7 +178,7 @@ export default function MusicPlayer() {
               
               <div className="md:col-span-4">
                 <div className="bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px] overflow-y-auto">
-                  <SongList music={runtime.music} playback={runtime.playback} />
+                  <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
                 </div>
               </div>
             </div>

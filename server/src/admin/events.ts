@@ -6,7 +6,8 @@ export type AdminAction =
   | "folder_delete"
   | "track_update"
   | "track_delete"
-  | "cover_replace";
+  | "cover_replace"
+  | "metadata_apply";
 
 /** One audit row per admin mutation; detail must never carry a secret. */
 export function recordAdminEvent(

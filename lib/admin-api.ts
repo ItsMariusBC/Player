@@ -32,6 +32,30 @@ export interface TrackUpdateResult {
   tagsWritten: boolean;
 }
 
+/** A metadata proposal; mirrors server/src/metadata/search.ts. */
+export interface Proposal {
+  /** Opaque, valid 15 minutes on the server; the apply route takes it instead of a URL. */
+  id: string;
+  source: "musicbrainz" | "deezer" | "itunes";
+  title: string;
+  artist: string;
+  album: string | null;
+  year: number | null;
+  coverUrl: string | null;
+}
+
+export interface MetadataSearchResult {
+  proposals: Proposal[];
+  /** A provider was skipped (rate limit) or did not answer. */
+  partial: boolean;
+}
+
+export interface MetadataApplyResult extends TrackUpdateResult {
+  coverApplied: boolean;
+  /** "cover_rejected" when the text was applied but the proposed cover was refused. */
+  coverError?: string;
+}
+
 export type ImportState = "processing" | "ready" | "failed";
 
 export interface ImportDto {
@@ -97,6 +121,46 @@ export function replaceCover(trackId: string, image: File): Promise<{ hasCover: 
   const body = new FormData();
   body.append("file", image);
   return api<{ hasCover: true }>(`/api/admin/tracks/${id(trackId)}/cover`, { method: "POST", body });
+}
+
+// Metadata
+
+export function searchMetadata(
+  q: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<MetadataSearchResult> {
+  return api<MetadataSearchResult>(`/api/admin/metadata/search?q=${encodeURIComponent(q)}`, {
+    signal: opts.signal,
+  });
+}
+
+const isApplyResult = (value: unknown): value is MetadataApplyResult =>
+  typeof value === "object" &&
+  value !== null &&
+  "track" in value &&
+  typeof (value as { tagsWritten?: unknown }).tagsWritten === "boolean";
+
+/**
+ * Applies a proposal's title, artist and album, and its cover when asked. A refused cover
+ * answers 422 cover_rejected with the updated track: that is a result, not a failure.
+ */
+export async function applyMetadata(
+  trackId: string,
+  proposalId: string,
+  applyCover: boolean,
+): Promise<MetadataApplyResult> {
+  try {
+    return await api<MetadataApplyResult>(
+      `/api/admin/tracks/${id(trackId)}/metadata`,
+      json("POST", { proposalId, applyCover }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "cover_rejected" && isApplyResult(error.details)) {
+      const { track, tagsWritten } = error.details;
+      return { track, tagsWritten, coverApplied: false, coverError: "cover_rejected" };
+    }
+    throw error;
+  }
 }
 
 // Imports

@@ -1,14 +1,16 @@
 // components/admin/admin-panel.tsx
 // Admin panel, sized and styled like the expanded visualizer (the page unmounts the rest of
 // the UI while it is shown). Folders on the left, the tracks of the selected folder in the
-// centre with the import drop zone below them, the tag editor on the right. Every mutation goes through lib/admin-api, then
-// reloads the admin catalogue and the player's one; a failure shows in the banner.
+// centre with the import drop zone below them, the tag editor on the right, the metadata
+// dialog above. Every mutation goes through lib/admin-api, then reloads the admin catalogue
+// and the player's one; a failure shows in the banner.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { m } from "framer-motion";
 import { PanelButton } from "@/components/visualizer-panel";
 import { buttonVariants } from "@/components/ui/button";
 import { ContextMenu, type MenuItem } from "@/components/admin/context-menu";
 import { FolderTree } from "@/components/admin/folder-tree";
+import { MetadataDialog } from "@/components/admin/metadata-dialog";
 import { TrackEditor } from "@/components/admin/track-editor";
 import { TrackTable } from "@/components/admin/track-table";
 import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
@@ -42,11 +44,9 @@ export interface AdminPanelProps {
   onClose: () => void;
   /** Reloads the player's catalogue (useCatalog().refresh). */
   onCatalogChanged: () => Promise<void> | void;
-  /** « Rechercher les métadonnées » stays disabled until this is given (Task 12). */
-  onSearchMetadata?: (trackId: string) => void;
 }
 
-export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: AdminPanelProps) {
+export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   const [banner, setBanner] = useState<string | null>(null);
   const showError = useCallback((error: unknown) => {
     console.error("Admin action failed", error);
@@ -64,6 +64,9 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
   const [inFlight, setInFlight] = useState(0);
   const [lastSave, setLastSave] = useState<{ trackId: string; tagsWritten: boolean } | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ trackId: string; n: number } | null>(null);
+  const [metadataTrackId, setMetadataTrackId] = useState<string | null>(null);
+  // Bumped after a metadata apply so the editor remounts with the new tags.
+  const [editorEpoch, setEditorEpoch] = useState(0);
   // Never reset, so a new request is always newer than any the editor already honoured.
   const focusCounter = useRef(0);
   const firstItemRef = useRef<HTMLButtonElement>(null);
@@ -73,6 +76,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
     selectedFolderId !== null && findFolder(folders, selectedFolderId) ? selectedFolderId : null;
   const visibleTracks = tracksInFolder(folders, tracks, folderId);
   const selectedTrack = tracks.find((track) => track.id === selectedTrackId);
+  const metadataTrack = tracks.find((track) => track.id === metadataTrackId);
 
   useEffect(() => {
     firstItemRef.current?.focus();
@@ -163,6 +167,27 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
       const { tagsWritten } = await adminApi.updateTrack(trackId, patch);
       setLastSave({ trackId, tagsWritten });
     });
+
+  const onSearchMetadata = (trackId: string) => {
+    setSelectedTrackId(trackId);
+    setFocusRequest(null);
+    setMetadataTrackId(trackId);
+  };
+
+  const closeMetadata = useCallback(() => setMetadataTrackId(null), []);
+
+  const onMetadataApplied = (trackId: string, result: adminApi.MetadataApplyResult) => {
+    setMetadataTrackId(null);
+    setLastSave({ trackId, tagsWritten: result.tagsWritten });
+    if (result.coverError) {
+      setBanner("Tags appliqués, mais la pochette proposée a été refusée");
+    }
+    setInFlight((n) => n + 1);
+    Promise.all([refreshAdmin(), onCatalogChanged()])
+      .then(() => setEditorEpoch((n) => n + 1))
+      .catch(showError)
+      .finally(() => setInFlight((n) => n - 1));
+  };
 
   const deleteTrack = (trackId: string) =>
     void run(async () => {
@@ -261,16 +286,14 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
             },
           },
           { id: "move", label: "Déplacer vers…", submenu: targets },
-          onSearchMetadata
-            ? {
-                id: "metadata",
-                label: "Rechercher les métadonnées",
-                onSelect: () => {
-                  closeMenu();
-                  onSearchMetadata(state.id);
-                },
-              }
-            : { id: "metadata", label: "Rechercher les métadonnées", disabled: true, title: "Bientôt" },
+          {
+            id: "metadata",
+            label: "Rechercher les métadonnées",
+            onSelect: () => {
+              closeMenu();
+              onSearchMetadata(state.id);
+            },
+          },
           {
             id: "delete",
             label: "Supprimer",
@@ -429,7 +452,7 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
         <aside className="shrink-0 md:w-80 md:overflow-y-auto">
           {selectedTrack ? (
             <TrackEditor
-              key={selectedTrack.id}
+              key={`${selectedTrack.id}:${editorEpoch}`}
               track={selectedTrack}
               folderLabel={buildFolderPathLabel(folders, selectedTrack.folderId)}
               tagsWritten={lastSave?.trackId === selectedTrack.id ? lastSave.tagsWritten : undefined}
@@ -445,6 +468,14 @@ export function AdminPanel({ onClose, onCatalogChanged, onSearchMetadata }: Admi
           )}
         </aside>
       </div>
+
+      {metadataTrack && (
+        <MetadataDialog
+          track={metadataTrack}
+          onClose={closeMetadata}
+          onApplied={(result) => onMetadataApplied(metadataTrack.id, result)}
+        />
+      )}
 
       {menu && openMenu && (
         <ContextMenu

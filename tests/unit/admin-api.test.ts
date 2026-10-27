@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ApiError } from "../../lib/api";
 import {
+  applyMetadata,
   createFolder,
   deleteFolder,
   deleteTrack,
@@ -8,6 +9,7 @@ import {
   getLimits,
   listImports,
   replaceCover,
+  searchMetadata,
   updateFolder,
   updateTrack,
   uploadFile,
@@ -242,5 +244,52 @@ describe("uploadFile", () => {
     await pending;
     expect(added).toHaveLength(1);
     expect(removed).toEqual(added);
+  });
+});
+
+describe("metadata calls", () => {
+  const track = { id: "t", title: "T" };
+
+  test("searchMetadata encodes q and passes the signal", async () => {
+    const calls = stubFetch(200, { proposals: [], partial: true });
+    const controller = new AbortController();
+    expect(await searchMetadata("AC/DC & co", { signal: controller.signal })).toEqual({
+      proposals: [],
+      partial: true,
+    });
+    expect(calls[0]!.url).toBe("/api/admin/metadata/search?q=AC%2FDC%20%26%20co");
+    expect(calls[0]!.init.signal).toBe(controller.signal);
+  });
+
+  test("applyMetadata posts the proposal id and the cover choice", async () => {
+    const result = { track, tagsWritten: true, coverApplied: true };
+    const calls = stubFetch(200, result);
+    expect(await applyMetadata("a b", "p1", true)).toEqual(result as never);
+    expect(calls[0]!.url).toBe("/api/admin/tracks/a%20b/metadata");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ proposalId: "p1", applyCover: true });
+  });
+
+  test("applyMetadata turns 422 cover_rejected into a result with coverError", async () => {
+    stubFetch(422, {
+      error: { code: "cover_rejected", message: "refused" },
+      track,
+      tagsWritten: false,
+      coverApplied: false,
+      coverError: "cover_rejected",
+    });
+    expect(await applyMetadata("t", "p1", true)).toEqual({
+      track,
+      tagsWritten: false,
+      coverApplied: false,
+      coverError: "cover_rejected",
+    } as never);
+  });
+
+  test("applyMetadata rethrows other errors, proposal_expired included", async () => {
+    stubFetch(404, { error: { code: "proposal_expired", message: "expired" } });
+    const error = await applyMetadata("t", "p1", false).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("proposal_expired");
   });
 });

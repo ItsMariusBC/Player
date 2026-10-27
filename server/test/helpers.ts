@@ -9,6 +9,7 @@ import { upsertUser } from "../src/auth/users.ts";
 import { loadConfig } from "../src/config.ts";
 import { openDatabase } from "../src/db.ts";
 import { createMediaStorage } from "../src/media/storage.ts";
+import { createMetadataSearch, type MetadataProvider } from "../src/metadata/search.ts";
 import { migrate } from "../src/migrations.ts";
 import { createFakeOidc, type FakeAccount, type FakeOidc } from "./oidc-fake.ts";
 
@@ -18,6 +19,12 @@ export interface TestAppOptions {
   staticDir?: string;
   env?: Record<string, string>;
   mount?: AppDeps["mount"];
+  /** Metadata providers and the cover guard's fetch/resolve; nothing reaches the network. */
+  metadata?: {
+    providers?: MetadataProvider[];
+    fetch?: typeof globalThis.fetch;
+    resolve?: (host: string) => Promise<string[]>;
+  };
 }
 
 export interface LogEntry {
@@ -64,7 +71,19 @@ export function createTestApp(opts: TestAppOptions = {}) {
   const log: LogEntry[] = [];
   const logger = (event: string, data?: Record<string, unknown>) => log.push({ event, data });
   const imports = createImportQueue({ db, storage, log: logger, now: clock });
+  const metadata = createMetadataSearch({
+    providers: opts.metadata?.providers ?? [],
+    now: clock,
+    log: logger,
+    fetch:
+      opts.metadata?.fetch ??
+      (async () => {
+        throw new Error("network disabled in tests");
+      }),
+    resolve: opts.metadata?.resolve ?? (async () => ["93.184.216.34"]),
+  });
   const app = createApp({
+    metadata,
     config,
     db,
     oidc,

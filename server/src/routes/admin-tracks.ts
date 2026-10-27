@@ -1,24 +1,25 @@
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
-import { copyFile, open, rename, rm, stat } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 import { recordAdminEvent } from "../admin/events.ts";
+import {
+  applyCoverFile,
+  applyTrackPatch,
+  createTrackLocks,
+  readyTrack,
+  TrackNotFound,
+  UnknownFolder,
+  type TrackPatch,
+  type WithTrackLock,
+} from "../admin/track-edit.ts";
 import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import { getFolder } from "../catalog/folders.ts";
-import {
-  deleteTrack,
-  findTrackBySha,
-  getTrack,
-  moveTrack,
-  toTrackDto,
-  updateTrack,
-} from "../catalog/tracks.ts";
+import { deleteTrack, getTrack, toTrackDto } from "../catalog/tracks.ts";
 import { inTransaction } from "../catalog/tx.ts";
-import type { TrackRecord } from "../catalog/types.ts";
 import { jsonError, readJsonObject } from "../http.ts";
-import { hashFile } from "../media/probe.ts";
-import type { CoverExt, MediaStorage } from "../media/storage.ts";
-import { writeTags } from "../media/tags.ts";
+import { MAX_COVER_BYTES, sniffImage } from "../media/image.ts";
+import type { MediaStorage } from "../media/storage.ts";
 import {
   catalogErrorResponse,
   isNullableId,
@@ -29,22 +30,7 @@ import {
 } from "./catalog-errors.ts";
 import { receive } from "./multipart.ts";
 
-export const MAX_COVER_BYTES = 5 * 1024 * 1024;
-
-/** Detects the image type from its signature; the client's filename and type are ignored. */
-export function sniffImage(head: Buffer): CoverExt | null {
-  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "jpg";
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (head.length >= 8 && png.every((byte, i) => head[i] === byte)) return "png";
-  if (
-    head.length >= 12 &&
-    head.toString("latin1", 0, 4) === "RIFF" &&
-    head.toString("latin1", 8, 12) === "WEBP"
-  ) {
-    return "webp";
-  }
-  return null;
-}
+export { MAX_COVER_BYTES, sniffImage };
 
 async function readHead(file: string): Promise<Buffer> {
   const handle = await open(file, "r");
@@ -57,18 +43,8 @@ async function readHead(file: string): Promise<Buffer> {
   }
 }
 
-class UnknownFolder extends Error {}
-
 const describe = (error: unknown) =>
   error instanceof Error ? `${error.name}: ${error.message}` : "unknown";
-
-interface TrackPatch {
-  title?: string;
-  artist?: string;
-  album?: string;
-  folderId?: string | null;
-  position?: number;
-}
 
 const PATCH_KEYS = ["title", "artist", "album", "folderId", "position"] as const;
 
@@ -100,68 +76,21 @@ function parsePatch(body: Record<string, unknown> | null): TrackPatch | null {
   return patch;
 }
 
-/** Serialises the file work on one track (tag rewrite, cover, delete). */
-function createTrackLocks() {
-  const tails = new Map<string, Promise<unknown>>();
-  return async function withLock<T>(trackId: string, fn: () => Promise<T>): Promise<T> {
-    const previous = tails.get(trackId) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tail = run.catch(() => {});
-    tails.set(trackId, tail);
-    try {
-      return await run;
-    } finally {
-      if (tails.get(trackId) === tail) tails.delete(trackId);
-    }
-  };
-}
-
 export function adminTrackRoutes(
   deps: {
     db: DatabaseSync;
     storage: MediaStorage;
     now: () => Date;
     log?: (event: string, data?: Record<string, unknown>) => void;
+    /** The app-wide track lock; a private one when omitted. */
+    trackLocks?: WithTrackLock;
   },
   session: MiddlewareHandler<AuthEnv>,
 ) {
   const { db, storage } = deps;
-  const withLock = createTrackLocks();
+  const withLock = deps.trackLocks ?? createTrackLocks();
   const routes = new Hono<AuthEnv>();
   routes.use("*", session, requireAdmin);
-
-  const readyTrack = (id: string): TrackRecord | null => {
-    const track = getTrack(db, id);
-    return track && track.status === "ready" ? track : null;
-  };
-
-  /**
-   * Rewrites the tags on a scratch copy and returns it with its sha256 and size, or null when
-   * no tag could be written. The original is never touched here: the caller moves the copy
-   * into place after the database commit, and removes it otherwise.
-   */
-  async function tagCopy(track: TrackRecord, patch: TrackPatch) {
-    if (track.format === "wav") return null;
-    const tags = {
-      title: patch.title ?? track.title,
-      artist: patch.artist ?? track.artist,
-      album: patch.album ?? track.album,
-    };
-    const copy = storage.scratchPath(track.id);
-    try {
-      await copyFile(storage.originalPath(track.id, track.format), copy);
-      if (!(await writeTags(copy, track.format, tags, deps.log))) {
-        await rm(copy, { force: true });
-        return null;
-      }
-      const [sha256, info] = await Promise.all([hashFile(copy), stat(copy)]);
-      return { copy, sha256, sizeBytes: info.size };
-    } catch (error) {
-      deps.log?.("tags.rewrite_failed", { trackId: track.id, error: describe(error) });
-      await rm(copy, { force: true });
-      return null;
-    }
-  }
 
   routes.patch("/:id", async (c) => {
     const id = c.req.param("id");
@@ -178,71 +107,21 @@ export function adminTrackRoutes(
       return jsonError(c, 400, "bad_request", "Unknown folderId");
     }
     return withLock(id, async () => {
-      const track = readyTrack(id);
-      if (!track) return jsonError(c, 404, "not_found", "Track not found");
-      const touchesTags =
-        patch.title !== undefined || patch.artist !== undefined || patch.album !== undefined;
-      let tagged = touchesTags ? await tagCopy(track, patch) : null;
-      if (tagged) {
-        const owner = findTrackBySha(db, tagged.sha256);
-        if (owner && owner.id !== id) {
-          // Another track already has these exact bytes: keep this file as it is.
-          deps.log?.("tags.sha_collision", { trackId: id, otherId: owner.id });
-          await rm(tagged.copy, { force: true });
-          tagged = null;
-        }
-      }
-      const tagsWritten = tagged !== null;
-      const now = deps.now();
-      let updated: TrackRecord;
       try {
-        updated = inTransaction(db, () => {
-          let result = updateTrack(
-            db,
-            id,
-            {
-              title: patch.title,
-              artist: patch.artist,
-              album: patch.album,
-              ...(tagged ? { sha256: tagged.sha256, sizeBytes: tagged.sizeBytes } : {}),
-            },
-            now,
-          );
-          if (patch.folderId !== undefined || patch.position !== undefined) {
-            // Checked again here: the folder may have been deleted while the tags were written.
-            if (patch.folderId && !getFolder(db, patch.folderId)) throw new UnknownFolder();
-            const folderId = patch.folderId === undefined ? result.folderId : patch.folderId;
-            result = moveTrack(db, id, folderId, patch.position, now);
-          }
-          recordAdminEvent(
-            db,
-            {
-              userId: c.get("user").id,
-              action: "track_update",
-              trackId: id,
-              detail: { ...patch, tagsWritten },
-            },
-            now,
-          );
-          return result;
+        const { track, tagsWritten } = await applyTrackPatch(deps, id, patch, {
+          userId: c.get("user").id,
+          action: "track_update",
+          detail: { ...patch },
         });
+        return c.json({ track: toTrackDto(track), tagsWritten });
       } catch (error) {
-        if (tagged) await rm(tagged.copy, { force: true });
+        if (error instanceof TrackNotFound)
+          return jsonError(c, 404, "not_found", "Track not found");
         if (error instanceof UnknownFolder) {
           return jsonError(c, 400, "bad_request", "Unknown folderId");
         }
         return catalogErrorResponse(c, error);
       }
-      if (tagged) {
-        try {
-          await rename(tagged.copy, storage.originalPath(id, track.format));
-        } catch (error) {
-          // Same-directory rename: very unlikely, but the row now describes the tagged copy.
-          deps.log?.("tags.replace_failed", { trackId: id, error: describe(error) });
-          await rm(tagged.copy, { force: true });
-        }
-      }
-      return c.json({ track: toTrackDto(updated), tagsWritten });
     });
   });
 
@@ -278,7 +157,7 @@ export function adminTrackRoutes(
 
   routes.post("/:id/cover", async (c) => {
     const id = c.req.param("id");
-    if (!readyTrack(id)) return jsonError(c, 404, "not_found", "Track not found");
+    if (!readyTrack(db, id)) return jsonError(c, 404, "not_found", "Track not found");
     return withLock(id, async () => {
       const upload = storage.scratchPath(id);
       try {
@@ -292,27 +171,19 @@ export function adminTrackRoutes(
         }
         const ext = sniffImage(await readHead(upload));
         if (!ext) return jsonError(c, 400, "bad_request", "Expected a JPEG, PNG or WebP image");
-        // The track may have been deleted while the body was streaming.
-        if (!readyTrack(id)) return jsonError(c, 404, "not_found", "Track not found");
-        const previous = readyTrack(id)?.coverExt ?? null;
-        // A cover with the same extension is overwritten here; another one survives until
-        // the commit, so a failed database step leaves the previous cover in use.
-        await storage.replaceCover(id, upload, ext);
-        const now = deps.now();
         try {
-          inTransaction(db, () => {
-            updateTrack(db, id, { coverExt: ext }, now);
-            recordAdminEvent(
-              db,
-              { userId: c.get("user").id, action: "cover_replace", trackId: id, detail: { ext } },
-              now,
-            );
+          await applyCoverFile(deps, id, upload, ext, {
+            userId: c.get("user").id,
+            action: "cover_replace",
+            detail: { ext },
           });
         } catch (error) {
-          if (previous !== ext) await rm(storage.coverPath(id, ext), { force: true });
+          // The track may have been deleted while the body was streaming.
+          if (error instanceof TrackNotFound) {
+            return jsonError(c, 404, "not_found", "Track not found");
+          }
           throw error;
         }
-        await storage.removeOtherCovers(id, ext);
         return c.json({ hasCover: true });
       } finally {
         await rm(upload, { force: true });

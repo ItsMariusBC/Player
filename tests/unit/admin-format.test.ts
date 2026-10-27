@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isMetadataQueryValid,
+  metadataQuery,
+  proposalDetails,
   buildFolderPathLabel,
   countFolderItems,
   findFolder,
@@ -116,5 +119,32 @@ describe("tagsStatusLabel", () => {
     expect(tagsStatusLabel(true, "flac")).toBe("Tags écrits dans le fichier");
     expect(tagsStatusLabel(false, "wav")).toBe("Tags non écrits (WAV)");
     expect(tagsStatusLabel(false, "mp3")).toBe("Tags non écrits");
+  });
+});
+
+describe("metadata dialog helpers", () => {
+  test("metadataQuery joins title and artist, or keeps the title alone", () => {
+    expect(metadataQuery({ title: " Clair de lune ", artist: "Debussy " })).toBe(
+      "Clair de lune Debussy",
+    );
+    expect(metadataQuery({ title: "Sans artiste", artist: "  " })).toBe("Sans artiste");
+    expect(metadataQuery({ title: "x".repeat(150), artist: "y".repeat(100) }).length).toBe(200);
+  });
+
+  test("isMetadataQueryValid follows the server bounds on the trimmed query", () => {
+    expect(isMetadataQueryValid("ab")).toBe(true);
+    expect(isMetadataQueryValid(" a ")).toBe(false);
+    expect(isMetadataQueryValid("x".repeat(200))).toBe(true);
+    expect(isMetadataQueryValid("x".repeat(201))).toBe(false);
+  });
+
+  test("proposalDetails lists album, year and source when present", () => {
+    const base = { id: "p", title: "T", artist: "A", coverUrl: null };
+    expect(proposalDetails({ ...base, source: "deezer", album: "Disque", year: 1905 })).toBe(
+      "Disque · 1905 · Deezer",
+    );
+    expect(proposalDetails({ ...base, source: "musicbrainz", album: null, year: null })).toBe(
+      "MusicBrainz",
+    );
   });
 });

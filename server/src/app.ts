@@ -6,6 +6,9 @@ import type { OidcAdapter } from "./auth/oidc.ts";
 import type { ImportQueue } from "./admin/imports.ts";
 import { adminFolderRoutes } from "./routes/admin-folders.ts";
 import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
+import { createTrackLocks } from "./admin/track-edit.ts";
+import type { MetadataSearch } from "./metadata/search.ts";
+import { addMetadataApplyRoute, adminMetadataRoutes } from "./routes/admin-metadata.ts";
 import { adminTrackRoutes } from "./routes/admin-tracks.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
@@ -22,6 +25,8 @@ export interface AppDeps {
   oidc: OidcAdapter;
   storage: MediaStorage;
   imports: ImportQueue;
+  /** Metadata lookup; its routes are not mounted when omitted. */
+  metadata?: MetadataSearch;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -76,7 +81,14 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
   app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
   app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
-  app.route("/api/admin/tracks", adminTrackRoutes({ ...deps, now }, session));
+  // One lock for every route that touches a track's files (PATCH, DELETE, cover, metadata).
+  const trackLocks = createTrackLocks();
+  const trackRoutes = adminTrackRoutes({ ...deps, now, trackLocks }, session);
+  if (deps.metadata) {
+    addMetadataApplyRoute(trackRoutes, { ...deps, metadata: deps.metadata, now, trackLocks });
+    app.route("/api/admin/metadata", adminMetadataRoutes({ metadata: deps.metadata }, session));
+  }
+  app.route("/api/admin/tracks", trackRoutes);
 
   deps.mount?.(app, session);
 

@@ -1,6 +1,7 @@
 // lib/admin-format.ts
 // Pure helpers of the admin panel (folder labels, track order, durations). No React here,
 // so the Bun unit tests import them directly.
+import type { Proposal } from "@/lib/admin-api";
 import { folderAncestors, type FolderNode, type TrackDto } from "@/lib/catalog";
 
 export const INBOX_LABEL = "Boîte d'arrivée";
@@ -102,4 +103,35 @@ export function formatDuration(durationMs: number | null): string {
 export function tagsStatusLabel(tagsWritten: boolean, format: TrackDto["format"]): string {
   if (tagsWritten) return "Tags écrits dans le fichier";
   return format === "wav" ? "Tags non écrits (WAV)" : "Tags non écrits";
+}
+
+/** Query bounds of GET /api/admin/metadata/search. */
+export const METADATA_QUERY_MIN = 2;
+export const METADATA_QUERY_MAX = 200;
+
+/** Prefill of the metadata search: "title artist", the title alone when there is no artist. */
+export function metadataQuery(track: Pick<TrackDto, "title" | "artist">): string {
+  const query = [track.title, track.artist]
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .join(" ");
+  return query.slice(0, METADATA_QUERY_MAX).trim();
+}
+
+export function isMetadataQueryValid(query: string): boolean {
+  const length = query.trim().length;
+  return length >= METADATA_QUERY_MIN && length <= METADATA_QUERY_MAX;
+}
+
+export const PROPOSAL_SOURCE_LABELS: Record<Proposal["source"], string> = {
+  musicbrainz: "MusicBrainz",
+  deezer: "Deezer",
+  itunes: "iTunes",
+};
+
+/** "Album · 1905 · Deezer": the parts that exist, in that order. */
+export function proposalDetails(proposal: Proposal): string {
+  return [proposal.album, proposal.year?.toString(), PROPOSAL_SOURCE_LABELS[proposal.source]]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
 }

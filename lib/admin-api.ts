@@ -351,3 +351,29 @@ export function getMaintenance(): Promise<MaintenanceStatus> {
 export function runMaintenance(): Promise<MaintenanceResult> {
   return api<MaintenanceResult>("/api/admin/maintenance/run", { method: "POST" });
 }
+
+/** Light-variant and WAV conversion progress of the ready tracks (GET /api/admin/media/optimize). */
+export interface MediaStatus {
+  total: number;
+  /** Tracks with a light variant. */
+  light: number;
+  /** Attempted without a variant. */
+  failed: number;
+  /** Variant never attempted. */
+  pending: number;
+  /** Tracks still stored as WAV. */
+  wav: number;
+  /** An optimization pass is in progress. */
+  running: boolean;
+  /** false when the server cannot run ffmpeg. */
+  available: boolean;
+}
+
+export function getMediaStatus(): Promise<MediaStatus> {
+  return api<MediaStatus>("/api/admin/media/optimize");
+}
+
+/** Starts an optimization pass: queued is 0 when a pass was already running or nothing is left. */
+export function startMediaOptimize(): Promise<BackfillResult> {
+  return api<BackfillResult>("/api/admin/media/optimize", { method: "POST" });
+}

@@ -23,6 +23,14 @@ import { SongNotificationProvider } from "@/components/song-notification";
 import { cn } from "@/lib/cn";
 import { listMyRequests, type SongRequestDto } from "@/lib/requests-api";
 import { readSeenAt, unseenRequestChanges } from "@/lib/request-badge";
+import {
+  nextQualitySetting,
+  qualityLabel,
+  readQualityEnv,
+  readQualitySetting,
+  resolveQuality,
+  writeQualitySetting,
+} from "@/lib/quality";
 import { buttonVariants } from "@/components/ui/button";
 
 export default function MusicPlayer() {
@@ -42,6 +50,11 @@ export default function MusicPlayer() {
   const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
   const closeRequest = useCallback(() => setRequestOpen(false), []);
+  const [quality, setQuality] = useState(readQualitySetting);
+  useEffect(() => {
+    writeQualitySetting(quality);
+    musicManager?.setQuality(resolveQuality(quality, readQualityEnv()));
+  }, [quality, musicManager]);
   // The user's requests feed the « nouveautés » badge: loaded at mount and after each close of
   // the dialog (it writes the « seen » key on opening and on closing). Errors are ignored: the badge is optional.
   const [myRequests, setMyRequests] = useState<SongRequestDto[]>([]);
@@ -259,26 +272,37 @@ export default function MusicPlayer() {
                   <div className="min-h-0 flex-1 overflow-y-auto">
                     <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
                   </div>
-                  <button
-                    type="button"
-                    data-request-button=""
-                    className={cn(buttonVariants({ variant: "ghost" }), "shrink-0 w-full mt-3")}
-                    aria-label={
-                      unseenRequests > 0
-                        ? `Demander un son, ${unseenRequests} ${unseenRequests === 1 ? "nouveauté" : "nouveautés"}`
-                        : undefined
-                    }
-                    onClick={() => setRequestOpen(true)}
-                  >
-                    {unseenRequests > 0 && (
-                      <span
-                        aria-hidden="true"
-                        data-request-badge=""
-                        className="mr-2 inline-block size-2 rounded-full bg-purple-300"
-                      />
-                    )}
-                    Demander un son{unseenRequests > 0 ? ` (${unseenRequests})` : ""}
-                  </button>
+                  <div className="mt-3 flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      data-request-button=""
+                      className={cn(buttonVariants({ variant: "ghost" }), "flex-1")}
+                      aria-label={
+                        unseenRequests > 0
+                          ? `Demander un son, ${unseenRequests} ${unseenRequests === 1 ? "nouveauté" : "nouveautés"}`
+                          : undefined
+                      }
+                      onClick={() => setRequestOpen(true)}
+                    >
+                      {unseenRequests > 0 && (
+                        <span
+                          aria-hidden="true"
+                          data-request-badge=""
+                          className="mr-2 inline-block size-2 rounded-full bg-purple-300"
+                        />
+                      )}
+                      Demander un son{unseenRequests > 0 ? ` (${unseenRequests})` : ""}
+                    </button>
+                    <button
+                      type="button"
+                      data-quality-button=""
+                      className={cn(buttonVariants({ variant: "ghost" }), "flex-1")}
+                      aria-label={`Qualité de lecture : ${qualityLabel(quality)}`}
+                      onClick={() => setQuality(nextQualitySetting(quality))}
+                    >
+                      Qualité : {qualityLabel(quality)}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

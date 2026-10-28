@@ -34,6 +34,7 @@ const track = (
   position,
   loudnessLufs: null,
   truePeakDbtp: null,
+  hasLight: false,
   updatedAt: "2026-10-27T00:00:00.000Z",
 });
 
@@ -102,6 +103,9 @@ describe("folderAncestors", () => {
 describe("media URLs", () => {
   test("are same-origin API paths", () => {
     expect(mediaUrl("abc")).toBe("/api/media/abc");
+    expect(mediaUrl("abc", "max")).toBe("/api/media/abc");
+    expect(mediaUrl("abc", "light")).toBe("/api/media/abc?q=light");
+    expect(mediaUrl("a b", "light")).toBe("/api/media/a%20b?q=light");
     expect(coverUrl("abc")).toBe("/api/media/abc/cover");
   });
 

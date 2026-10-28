@@ -81,6 +81,8 @@ export interface TrackDto {
   durationMs: number | null;
   format: "flac" | "mp3" | "wav";
   hasCover: boolean;
+  /** A light (AAC) variant exists. */
+  hasLight: boolean;
   /** Null when not measured; the client then plays the track at 0 dB. */
   loudnessLufs: number | null;
   truePeakDbtp: number | null;

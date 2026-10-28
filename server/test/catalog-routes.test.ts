@@ -85,6 +85,7 @@ describe("GET /api/catalog", () => {
         "folderId",
         "format",
         "hasCover",
+        "hasLight",
         "id",
         "loudnessLufs",
         "position",

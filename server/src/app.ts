@@ -14,6 +14,7 @@ import { createTrackLocks } from "./admin/track-edit.ts";
 import type { MetadataSearch } from "./metadata/search.ts";
 import { addMetadataApplyRoute, adminMetadataRoutes } from "./routes/admin-metadata.ts";
 import { adminLoudnessRoutes } from "./routes/admin-loudness.ts";
+import { adminMediaRoutes } from "./routes/admin-media.ts";
 import { adminRequestRoutes } from "./routes/admin-requests.ts";
 import { requestRoutes } from "./routes/requests.ts";
 import { adminTrackRoutes } from "./routes/admin-tracks.ts";
@@ -98,6 +99,7 @@ export function createApp(deps: AppDeps) {
 
   app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
   app.route("/api/admin/loudness", adminLoudnessRoutes({ ...deps, now }, session));
+  app.route("/api/admin/media", adminMediaRoutes({ ...deps, now }, session));
   if (deps.maintenance) {
     app.route(
       "/api/admin/maintenance",

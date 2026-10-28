@@ -299,6 +299,7 @@ export function toTrackDto(t: TrackRecord): TrackDto {
     durationMs: t.durationMs,
     format: t.format,
     hasCover: t.coverExt !== null,
+    hasLight: t.aacSizeBytes !== null,
     loudnessLufs: t.loudnessLufs,
     truePeakDbtp: t.truePeakDbtp,
     position: t.position,

@@ -24,6 +24,9 @@ export interface TestAppOptions {
   mount?: AppDeps["mount"];
   /** Loudness measurement used by imports and the backfill; ffmpeg never runs in tests. */
   measure?: (file: string) => Promise<Loudness | null>;
+  /** WAV to FLAC conversion and AAC encoding; both fail by default, so originals stay as imported. */
+  convertWav?: (src: string, dest: string) => Promise<boolean>;
+  encodeAac?: (src: string, dest: string) => Promise<boolean>;
   /** Whether ffmpeg counts as available (default true). */
   ffmpegAvailable?: boolean | (() => Promise<boolean>);
   /** Disk stats used by the health check; defaults to plenty of free space. */
@@ -99,6 +102,8 @@ export function createTestApp(opts: TestAppOptions = {}) {
     log: logger,
     now: clock,
     measure: opts.measure ?? (async () => null),
+    convertWav: opts.convertWav ?? (async () => false),
+    encodeAac: opts.encodeAac ?? (async () => false),
     ffmpegAvailable:
       typeof opts.ffmpegAvailable === "function"
         ? opts.ffmpegAvailable

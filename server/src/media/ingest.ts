@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { findTrackBySha, insertTrack } from "../catalog/tracks.ts";
 import type { TrackRecord } from "../catalog/types.ts";
@@ -31,6 +33,11 @@ export interface IngestInput {
   cover?: (embedded: boolean) => Promise<ProbeResult["cover"]>;
   /** Loudness measurement; injected so tests never run ffmpeg. Omitted: not measured. Must not throw. */
   measure?: (file: string) => Promise<Loudness | null>;
+  /**
+   * Lossless WAV to FLAC conversion into dest; true on success. Omitted: WAV files are published
+   * as they are. Must not throw.
+   */
+  convertWav?: (file: string, dest: string) => Promise<boolean>;
   now: Date;
 }
 
@@ -62,9 +69,31 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
   } catch {
     // A failed measurement never fails the import; the backfill can retry later.
   }
+  // The published file: the dropped one, or its FLAC conversion (the sha256 stays the dropped one's).
+  let published = file;
+  let format = probe.format;
+  let sizeBytes = probe.sizeBytes;
+  if (probe.format === "wav" && input.convertWav) {
+    const dest = path.join(storage.incomingDir(importId), "converted.flac");
+    let converted = false;
+    try {
+      converted = await input.convertWav(file, dest);
+    } catch {
+      // A failed conversion never fails the import: the WAV is published as it is.
+    }
+    if (converted) {
+      try {
+        sizeBytes = (await stat(dest)).size;
+        published = dest;
+        format = "flac";
+      } catch {
+        converted = false;
+      }
+    }
+  }
   const cover = (await input.cover?.(probe.cover !== null)) ?? probe.cover;
   const trackId = crypto.randomUUID();
-  await storage.publish(importId, trackId, file, probe.format, cover);
+  await storage.publish(importId, trackId, published, format, cover);
   try {
     // Evaluated as late as possible: the folder may be deleted while the file is published.
     const folderId = input.folderId?.() ?? null;
@@ -78,8 +107,8 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
           artist: input.artist ?? probe.artist ?? "",
           album: input.album ?? probe.album ?? "",
           durationMs: probe.durationMs,
-          format: probe.format,
-          sizeBytes: probe.sizeBytes,
+          format,
+          sizeBytes,
           sha256: probe.sha256,
           coverExt: cover?.ext ?? null,
           status: "ready",

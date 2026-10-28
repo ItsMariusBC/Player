@@ -6,6 +6,7 @@ import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { createImportQueue, recoverStaleImports } from "./admin/imports.ts";
+import { createTrackLocks } from "./admin/track-edit.ts";
 import { createHealth } from "./health.ts";
 import { createMaintenance, scheduleMaintenance } from "./admin/maintenance.ts";
 import { createMediaStorage } from "./media/storage.ts";
@@ -87,9 +88,11 @@ const metadata = createMetadataSearch({
   log,
   userAgent,
 });
+const trackLocks = createTrackLocks();
 const imports = createImportQueue({
   db,
   storage,
+  trackLocks,
   log,
   ffmpegPath: config.ffmpegPath,
   download: { maxBytes: config.maxUploadBytes, userAgent },
@@ -110,6 +113,7 @@ const app = createApp({
   oidc,
   storage,
   imports,
+  trackLocks,
   health,
   metadata,
   maintenance,

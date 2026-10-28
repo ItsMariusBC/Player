@@ -3,6 +3,7 @@ import { rename, rm, stat } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { recordAdminEvent } from "./events.ts";
+import { createTrackLocks, type WithTrackLock } from "./track-edit.ts";
 import { convertTrackFormat, updateTrackLoudness, updateTrackVariant } from "../catalog/tracks.ts";
 import { inTransaction } from "../catalog/tx.ts";
 import { downloadToFile, type DownloadOptions } from "../media/download.ts";
@@ -40,9 +41,10 @@ export interface ImportQueue {
   backfillLoudness(): { queued: number; running: boolean };
   loudnessStatus(): Promise<LoudnessStatus>;
   /**
-   * Starts a lazy optimization pass (WAV to FLAC, then the light AAC variant) on the same chain.
-   * `queued` is the candidate count when a pass starts, 0 when one is already running or there
-   * is nothing to do.
+   * Manual start of a lazy optimization pass (WAV to FLAC, then the light AAC variant) on the same
+   * chain. It first clears `aac_attempted_at` on WAV tracks and on tracks without a variant, so
+   * earlier failures are retried. `queued` is the candidate count when a pass starts, 0 when one
+   * is already running or there is nothing to do.
    */
   startOptimize(): { queued: number; running: boolean };
   optimizeStatus(): Promise<OptimizeStatus>;
@@ -54,7 +56,7 @@ export interface OptimizeStatus {
   light: number;
   /** Attempted without a variant. */
   failed: number;
-  /** Variant never attempted. */
+  /** Not attempted yet (`aac_attempted_at` unset). */
   pending: number;
   /** Tracks still stored as WAV. */
   wav: number;
@@ -102,6 +104,8 @@ export function createImportQueue(deps: {
   /** Test seams: the measurement and the ffmpeg availability check. */
   measure?: (file: string) => Promise<Loudness | null>;
   ffmpegAvailable?: () => Promise<boolean>;
+  /** Per-track lock shared with the admin track routes (default: a private instance). */
+  trackLocks?: WithTrackLock;
   /** Test seams: WAV to FLAC conversion and AAC encoding (default: ffmpeg through transcode.ts). */
   convertWav?: (src: string, dest: string) => Promise<boolean>;
   encodeAac?: (src: string, dest: string) => Promise<boolean>;
@@ -132,8 +136,7 @@ export function createImportQueue(deps: {
   let availableCheckedAt: number | null = null;
   let backfilling = false;
   let optimizing = false;
-  // Tracks the current pass gave up converting: not picked again until the next pass.
-  const skipped = new Set<string>();
+  const withLock = deps.trackLocks ?? createTrackLocks();
   const inFlight = new Set<string>();
   const downloads = new Set<Promise<void>>();
   const waiting: (() => void)[] = [];
@@ -246,10 +249,12 @@ export function createImportQueue(deps: {
     });
   }
 
-  const OPTIMIZE_PENDING = "status = 'ready' AND (format = 'wav' OR aac_attempted_at IS NULL)";
+  // Only never-attempted tracks: a failure stamps `aac_attempted_at`, so it is not replayed
+  // automatically; the manual start clears the stamp to retry.
+  const OPTIMIZE_PENDING = "status = 'ready' AND aac_attempted_at IS NULL";
 
   function nextOptimizeCandidate(): { id: string } | undefined {
-    const skip = [...inFlight, ...skipped];
+    const skip = [...inFlight];
     const exclude = skip.length ? ` AND id NOT IN (${skip.map(() => "?").join(", ")})` : "";
     return db
       .prepare(
@@ -260,8 +265,16 @@ export function createImportQueue(deps: {
 
   function readOptimizeRow(id: string) {
     return db
-      .prepare("SELECT format, aac_attempted_at FROM tracks WHERE id = ? AND status = 'ready'")
-      .get(id) as { format: "flac" | "mp3" | "wav"; aac_attempted_at: string | null } | undefined;
+      .prepare(
+        "SELECT format, size_bytes, aac_attempted_at FROM tracks WHERE id = ? AND status = 'ready'",
+      )
+      .get(id) as
+      | {
+          format: "flac" | "mp3" | "wav";
+          size_bytes: number;
+          aac_attempted_at: string | null;
+        }
+      | undefined;
   }
 
   /** Converts a WAV original to FLAC; false (nothing changed) on any failure. */
@@ -296,7 +309,24 @@ export function createImportQueue(deps: {
     }
   }
 
-  async function encodeVariant(id: string, format: "flac" | "mp3" | "wav"): Promise<number | null> {
+  /** An `original.wav` left next to a FLAC row (a crash after the row switched): removed. */
+  async function removeStaleWav(id: string): Promise<void> {
+    const wav = storage.originalPath(id, "wav");
+    try {
+      await stat(wav);
+    } catch {
+      return;
+    }
+    await rm(wav, { force: true }).catch(() => {});
+    log?.("optimize.stale_wav_removed", { trackId: id });
+  }
+
+  /** The variant size, or null on failure or when it is not smaller than the original. */
+  async function encodeVariant(
+    id: string,
+    format: "flac" | "mp3" | "wav",
+    originalSize: number,
+  ): Promise<number | null> {
     const scratch = storage.scratchPath(id);
     try {
       if (!(await encodeLight(storage.originalPath(id, format), scratch))) {
@@ -304,6 +334,12 @@ export function createImportQueue(deps: {
         return null;
       }
       const { size } = await stat(scratch);
+      if (size >= originalSize) {
+        await rm(scratch, { force: true });
+        await rm(storage.variantPath(id), { force: true });
+        log?.("optimize.variant_not_smaller", { trackId: id, variantBytes: size, originalSize });
+        return null;
+      }
       await rename(scratch, storage.variantPath(id));
       return size;
     } catch (error) {
@@ -328,24 +364,24 @@ export function createImportQueue(deps: {
     }
     if (!candidate) {
       optimizing = false;
-      skipped.clear();
       return;
     }
     const id = candidate.id;
     inFlight.add(id);
     try {
-      // Rechecked at each stage: the track may have been deleted or changed in the meantime.
-      let row = readOptimizeRow(id);
-      if (row?.format === "wav" && !(await convertOriginal(id))) skipped.add(id);
-      row = readOptimizeRow(id);
-      if (row && row.aac_attempted_at === null) {
-        const size = await encodeVariant(id, row.format);
-        if (!updateTrackVariant(db, id, size, now())) {
-          await rm(storage.variantPath(id), { force: true }).catch(() => {});
+      // Under the track lock, and rechecked at each stage: the track may have been deleted or changed.
+      await withLock(id, async () => {
+        let row = readOptimizeRow(id);
+        if (row?.format === "flac") await removeStaleWav(id);
+        if (row?.format === "wav") await convertOriginal(id);
+        row = readOptimizeRow(id);
+        if (row && row.aac_attempted_at === null) {
+          const size = await encodeVariant(id, row.format, row.size_bytes);
+          if (!updateTrackVariant(db, id, size, now())) {
+            await rm(storage.variantPath(id), { force: true }).catch(() => {});
+          }
         }
-      } else if (!row) {
-        skipped.add(id);
-      }
+      });
     } catch (error) {
       // The database itself is failing: stop the pass rather than spin on the same track.
       log?.("media.optimize_failed", {
@@ -354,7 +390,6 @@ export function createImportQueue(deps: {
         error: error instanceof Error ? error.name : "unknown",
       });
       optimizing = false;
-      skipped.clear();
       return;
     } finally {
       inFlight.delete(id);
@@ -365,7 +400,6 @@ export function createImportQueue(deps: {
   function scheduleOptimizeStep() {
     chain = chain.then(optimizeStep).catch(() => {
       optimizing = false;
-      skipped.clear();
     });
   }
 
@@ -377,12 +411,16 @@ export function createImportQueue(deps: {
     ).n;
   }
 
-  function startOptimizePass(): number {
+  function startOptimizePass(retryFailed = false): number {
     if (optimizing) return 0;
+    if (retryFailed) {
+      db.prepare(
+        "UPDATE tracks SET aac_attempted_at = NULL WHERE status = 'ready' AND (format = 'wav' OR aac_size_bytes IS NULL)",
+      ).run();
+    }
     const n = countOptimizable();
     if (n === 0) return 0;
     optimizing = true;
-    skipped.clear();
     scheduleOptimizeStep();
     return n;
   }
@@ -597,7 +635,7 @@ export function createImportQueue(deps: {
       };
     },
     startOptimize() {
-      const queued = startOptimizePass();
+      const queued = startOptimizePass(true);
       return { queued, running: optimizing };
     },
     async optimizeStatus() {

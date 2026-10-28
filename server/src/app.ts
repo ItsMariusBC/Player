@@ -10,7 +10,7 @@ import { adminHealthRoutes } from "./routes/admin-health.ts";
 import { adminMaintenanceRoutes } from "./routes/admin-maintenance.ts";
 import { adminFolderRoutes } from "./routes/admin-folders.ts";
 import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
-import { createTrackLocks } from "./admin/track-edit.ts";
+import { createTrackLocks, type WithTrackLock } from "./admin/track-edit.ts";
 import type { MetadataSearch } from "./metadata/search.ts";
 import { addMetadataApplyRoute, adminMetadataRoutes } from "./routes/admin-metadata.ts";
 import { adminLoudnessRoutes } from "./routes/admin-loudness.ts";
@@ -33,6 +33,8 @@ export interface AppDeps {
   oidc: OidcAdapter;
   storage: MediaStorage;
   imports: ImportQueue;
+  /** Per-track file lock; pass the instance given to the import queue so both serialise together. */
+  trackLocks?: WithTrackLock;
   /** Metadata lookup; its routes are not mounted when omitted. */
   metadata?: MetadataSearch;
   /** Maintenance passes; its admin routes are not mounted when omitted. */
@@ -112,7 +114,7 @@ export function createApp(deps: AppDeps) {
   app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
   app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
   // One lock for every route that touches a track's files (PATCH, DELETE, cover, metadata).
-  const trackLocks = createTrackLocks();
+  const trackLocks = deps.trackLocks ?? createTrackLocks();
   const trackRoutes = adminTrackRoutes({ ...deps, now, trackLocks }, session);
   if (deps.metadata) {
     addMetadataApplyRoute(trackRoutes, { ...deps, metadata: deps.metadata, now, trackLocks });

@@ -8,8 +8,9 @@ import { cn } from "@/lib/cn";
 export function MediaStatus({ onError }: { onError: (error: unknown) => void }) {
   const { status, busy, start } = useMediaStatus(onError);
   if (!status) return null;
-  const disabled =
-    busy || status.running || (status.pending === 0 && status.wav === 0) || !status.available;
+  // Failures are retried by the button too (it clears them first).
+  const nothingToDo = status.pending === 0 && status.wav === 0 && status.failed === 0;
+  const disabled = busy || status.running || nothingToDo || !status.available;
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm text-purple-200/70">
       <span>

@@ -40,34 +40,56 @@ export function mediaRoutes(
     if (!track || track.status !== "ready") {
       return jsonError(c, 404, "not_found", "Track not found");
     }
-    let file = deps.storage.originalPath(track.id, track.format);
-    let type: string = AUDIO_TYPES[track.format];
-    let variant: string = track.format;
-    let info: { size: number; mtimeMs: number } | null = null;
-    if (c.req.query("q") === "light" && track.aacSizeBytes !== null) {
-      info = await statFile(deps.storage.variantPath(track.id));
-      if (info) {
-        file = deps.storage.variantPath(track.id);
-        type = "audio/mp4";
-        variant = "aac";
+    const wantLight = c.req.query("q") === "light";
+    const resolveFile = async (t: NonNullable<ReturnType<typeof getTrack>>) => {
+      if (wantLight && t.aacSizeBytes !== null) {
+        const light = await statFile(deps.storage.variantPath(t.id));
+        if (light) {
+          return {
+            file: deps.storage.variantPath(t.id),
+            type: "audio/mp4",
+            variant: "aac",
+            info: light,
+          };
+        }
       }
+      const file = deps.storage.originalPath(t.id, t.format);
+      return {
+        file,
+        type: AUDIO_TYPES[t.format] as string,
+        variant: t.format as string,
+        info: await statFile(file),
+      };
+    };
+    let current = track;
+    let resolved = await resolveFile(current);
+    if (resolved.info === null) {
+      // A WAV to FLAC conversion may have swapped the file after the row was read: read it once more.
+      const again = getTrack(deps.db, track.id);
+      if (!again || again.status !== "ready")
+        return jsonError(c, 404, "not_found", "Track not found");
+      current = again;
+      resolved = await resolveFile(current);
     }
-    info ??= await statFile(file);
+    const { file, type, variant, info } = resolved;
     if (info === null) return jsonError(c, 404, "not_found", "Track not found");
     const { size } = info;
 
-    const etag = `"${track.sha256}:${variant}"`;
+    // `?q=light` without a variant serves the original under the light URL: revalidate, so the
+    // browser never keeps the original for a URL that may later answer with the variant.
+    const cacheControl = wantLight && variant !== "aac" ? "private, no-cache" : IMMUTABLE;
+    const etag = `"${current.sha256}:${variant}"`;
     const headers: Record<string, string> = {
       "Content-Type": type,
       "Accept-Ranges": "bytes",
-      "Cache-Control": IMMUTABLE,
+      "Cache-Control": cacheControl,
       ETag: etag,
       "Last-Modified": httpDate(info.mtimeMs),
     };
     if (etagMatches(c.req.header("if-none-match"), etag)) {
       return new Response(null, {
         status: 304,
-        headers: { ETag: etag, "Cache-Control": IMMUTABLE },
+        headers: { ETag: etag, "Cache-Control": cacheControl },
       });
     }
     const ifRange = c.req.header("if-range");
@@ -77,7 +99,7 @@ export function mediaRoutes(
     if (range === "unsatisfiable") {
       return new Response(null, {
         status: 416,
-        headers: { ...headers, "Content-Range": `bytes */${size}` },
+        headers: { ...headers, "Cache-Control": "no-store", "Content-Range": `bytes */${size}` },
       });
     }
     const start = range?.start ?? 0;

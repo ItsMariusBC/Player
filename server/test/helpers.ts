@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createImportQueue } from "../src/admin/imports.ts";
+import { createTrackLocks } from "../src/admin/track-edit.ts";
 import { createHealth, type StatfsFn } from "../src/health.ts";
 import { createMaintenance } from "../src/admin/maintenance.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
@@ -96,9 +97,11 @@ export function createTestApp(opts: TestAppOptions = {}) {
 
   const log: LogEntry[] = [];
   const logger = (event: string, data?: Record<string, unknown>) => log.push({ event, data });
+  const trackLocks = createTrackLocks();
   const imports = createImportQueue({
     db,
     storage,
+    trackLocks,
     log: logger,
     now: clock,
     measure: opts.measure ?? (async () => null),
@@ -165,6 +168,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    trackLocks,
     maintenance,
     health,
     now: clock,
@@ -211,6 +215,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    trackLocks,
     maintenance,
     tempDir,
     cleanup,

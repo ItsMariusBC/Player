@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { loginAs } from "./auth.helpers";
 
 // The activation overlay covers the page: it must be dismissed before using the controls.
@@ -46,12 +46,16 @@ test("playback requests the light stream when the quality is Allégée", async (
   await cycleTo(page, "Allégée");
 
   // The player loads the current track as soon as the page opens, with the saved setting.
-  const lightRequest = page.waitForRequest(/\/api\/media\/[^?]+\?q=light/);
+  const lightResponse = page.waitForResponse(
+    (r) => /\/api\/media\/[^?]+\?q=light/.test(r.url()) && r.status() < 400,
+  );
   await page.reload();
   const activate = page.getByRole("button", { name: "Activer le lecteur" });
   await expect(activate).toBeVisible();
-  const response = await (await lightRequest).response();
-  expect([200, 206]).toContain(response?.status());
+  const response = await lightResponse;
+  expect([200, 206]).toContain(response.status());
+  // The light variant is audio/mp4; without one the original is served under its own audio type.
+  expect(response.headers()["content-type"]).toMatch(/^audio\/(mp4|flac|mpeg|wav|x-wav)/);
 
   await activate.click();
   await expect(activate).toHaveCount(0);
@@ -61,4 +65,56 @@ test("playback requests the light stream when the quality is Allégée", async (
     await page.keyboard.press("Space");
   }
   await expect(page.locator("body")).toContainText(/En lecture\s*:\s*\S+/);
+});
+
+interface OptimizeStatus {
+  light: number;
+  running: boolean;
+  available: boolean;
+}
+
+// An admin session in its own context, so the user session of `page` is left alone.
+async function optimizeAsAdmin(browser: Browser): Promise<OptimizeStatus | null> {
+  const context = await browser.newContext();
+  try {
+    const admin = await context.newPage();
+    await loginAs(admin, "admin@test");
+    const headers = { "X-Requested-With": "player" };
+    const read = async () =>
+      (await (
+        await admin.request.get("/api/admin/media/optimize", { headers })
+      ).json()) as OptimizeStatus;
+    if (!(await read()).available) return null;
+    const started = await admin.request.post("/api/admin/media/optimize", { headers });
+    expect(started.status()).toBe(202);
+    await expect
+      .poll(
+        async () => {
+          const status = await read();
+          return status.running === false && status.light >= 1;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    return await read();
+  } finally {
+    await context.close();
+  }
+}
+
+test("playback in Allégée gets audio/mp4 once a light variant is ready", async ({
+  page,
+  browser,
+}) => {
+  const status = await optimizeAsAdmin(browser);
+  test.skip(status === null, "ffmpeg is not available on this machine");
+
+  await openPlayer(page);
+  await cycleTo(page, "Allégée");
+  const lightResponse = page.waitForResponse(
+    (r) => /\/api\/media\/[^?]+\?q=light/.test(r.url()) && r.status() < 400,
+  );
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Activer le lecteur" })).toBeVisible();
+  expect((await lightResponse).headers()["content-type"]).toBe("audio/mp4");
 });

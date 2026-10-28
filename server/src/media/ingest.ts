@@ -4,7 +4,13 @@ import type { DatabaseSync } from "node:sqlite";
 import { findTrackBySha, insertTrack } from "../catalog/tracks.ts";
 import type { TrackRecord } from "../catalog/types.ts";
 import type { Loudness } from "./loudness.ts";
-import { probeFile, UnsupportedFormatError, type ProbeResult } from "./probe.ts";
+import {
+  probeFile,
+  readHead,
+  sniffFormat,
+  UnsupportedFormatError,
+  type ProbeResult,
+} from "./probe.ts";
 import type { MediaStorage } from "./storage.ts";
 
 export type IngestResult =
@@ -83,9 +89,15 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
     }
     if (converted) {
       try {
-        sizeBytes = (await stat(dest)).size;
-        published = dest;
-        format = "flac";
+        const size = (await stat(dest)).size;
+        // A converter that wrote nothing usable must not replace the WAV.
+        if (size > 0 && sniffFormat(await readHead(dest)) === "flac") {
+          sizeBytes = size;
+          published = dest;
+          format = "flac";
+        } else {
+          converted = false;
+        }
       } catch {
         converted = false;
       }

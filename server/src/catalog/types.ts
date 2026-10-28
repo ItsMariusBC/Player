@@ -22,6 +22,10 @@ export interface TrackRecord {
   truePeakDbtp: number | null;
   /** Last measurement attempt (success or not); null = never tried. Not exposed in the DTO. */
   loudnessMeasuredAt: Date | null;
+  /** Size of the light AAC variant (stream.m4a); null when there is none. */
+  aacSizeBytes: number | null;
+  /** Last variant attempt (success or not); null = never tried. Not exposed in the DTO. */
+  aacAttemptedAt: Date | null;
   position: number;
   createdAt: Date;
   updatedAt: Date;

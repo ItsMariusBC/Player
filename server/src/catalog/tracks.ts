@@ -17,6 +17,8 @@ interface TrackRow {
   loudness_lufs: number | null;
   true_peak_dbtp: number | null;
   loudness_measured_at: string | null;
+  aac_size_bytes: number | null;
+  aac_attempted_at: string | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -38,6 +40,8 @@ function toRecord(row: TrackRow): TrackRecord {
     loudnessLufs: row.loudness_lufs,
     truePeakDbtp: row.true_peak_dbtp,
     loudnessMeasuredAt: row.loudness_measured_at ? new Date(row.loudness_measured_at) : null,
+    aacSizeBytes: row.aac_size_bytes,
+    aacAttemptedAt: row.aac_attempted_at ? new Date(row.aac_attempted_at) : null,
     position: row.position,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -84,19 +88,33 @@ export function insertTrack(
   db: DatabaseSync,
   input: Omit<
     TrackRecord,
-    "createdAt" | "updatedAt" | "position" | "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt"
+    | "createdAt"
+    | "updatedAt"
+    | "position"
+    | "loudnessLufs"
+    | "truePeakDbtp"
+    | "loudnessMeasuredAt"
+    | "aacSizeBytes"
+    | "aacAttemptedAt"
   > &
-    Partial<Pick<TrackRecord, "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt">>,
+    Partial<
+      Pick<
+        TrackRecord,
+        "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt" | "aacSizeBytes" | "aacAttemptedAt"
+      >
+    >,
   now: Date,
 ): TrackRecord {
   const loudnessLufs = input.loudnessLufs ?? null;
   const truePeakDbtp = input.truePeakDbtp ?? null;
   const loudnessMeasuredAt = input.loudnessMeasuredAt ?? null;
+  const aacSizeBytes = input.aacSizeBytes ?? null;
+  const aacAttemptedAt = input.aacAttemptedAt ?? null;
   const position = nextPosition(db, input.folderId);
   const iso = now.toISOString();
   db.prepare(
-    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, loudness_lufs, true_peak_dbtp, loudness_measured_at, position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, loudness_lufs, true_peak_dbtp, loudness_measured_at, aac_size_bytes, aac_attempted_at, position, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.folderId,
@@ -112,6 +130,8 @@ export function insertTrack(
     loudnessLufs,
     truePeakDbtp,
     loudnessMeasuredAt?.toISOString() ?? null,
+    aacSizeBytes,
+    aacAttemptedAt?.toISOString() ?? null,
     position,
     iso,
     iso,
@@ -121,6 +141,8 @@ export function insertTrack(
     loudnessLufs,
     truePeakDbtp,
     loudnessMeasuredAt,
+    aacSizeBytes,
+    aacAttemptedAt,
     position,
     createdAt: now,
     updatedAt: now,
@@ -179,6 +201,35 @@ export function updateTrackLoudness(
     : db
         .prepare("UPDATE tracks SET loudness_measured_at = ? WHERE id = ?")
         .run(now.toISOString(), id);
+  return Number(result.changes) > 0;
+}
+
+/**
+ * Records a light-variant attempt: stamps `aac_attempted_at`, stores the size (null = failure).
+ * `updated_at` is left alone (it drives client cover caching). False when the track is gone.
+ */
+export function updateTrackVariant(
+  db: DatabaseSync,
+  id: string,
+  sizeBytes: number | null,
+  at: Date,
+): boolean {
+  const result = db
+    .prepare("UPDATE tracks SET aac_size_bytes = ?, aac_attempted_at = ? WHERE id = ?")
+    .run(sizeBytes, at.toISOString(), id);
+  return Number(result.changes) > 0;
+}
+
+/** Switches a track to its converted original (WAV to FLAC). `updated_at` is left alone. */
+export function convertTrackFormat(
+  db: DatabaseSync,
+  id: string,
+  format: "flac",
+  sizeBytes: number,
+): boolean {
+  const result = db
+    .prepare("UPDATE tracks SET format = ?, size_bytes = ? WHERE id = ?")
+    .run(format, sizeBytes, id);
   return Number(result.changes) > 0;
 }
 

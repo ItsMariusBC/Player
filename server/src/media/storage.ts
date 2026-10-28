@@ -24,6 +24,8 @@ export interface MediaStorage {
   ): Promise<void>;
   originalPath(trackId: string, ext: AudioFormat): string;
   coverPath(trackId: string, ext: CoverExt): string;
+  /** The light AAC variant (always stream.m4a), whether or not it exists. */
+  variantPath(trackId: string): string;
   /** Writes the cover and removes a previous cover stored with another extension. */
   writeCover(trackId: string, data: Buffer, ext: CoverExt): Promise<void>;
   /** Moves a file of the track directory into place as the cover (other covers are kept). */
@@ -96,6 +98,9 @@ export function createMediaStorage(dataDir: string): MediaStorage {
     },
     coverPath(trackId, ext) {
       return path.join(trackDir(trackId), `cover.${safeExt(ext, COVER_EXTS)}`);
+    },
+    variantPath(trackId) {
+      return path.join(trackDir(trackId), "stream.m4a");
     },
     async writeCover(trackId, data, ext) {
       await writeFile(storage.coverPath(trackId, ext), data);

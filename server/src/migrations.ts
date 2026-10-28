@@ -92,6 +92,13 @@ CREATE INDEX song_requests_user ON song_requests(user_id);
 ALTER TABLE imports ADD COLUMN request_id TEXT REFERENCES song_requests(id) ON DELETE SET NULL;
 `,
   },
+  {
+    id: 8,
+    sql: `
+ALTER TABLE tracks ADD COLUMN aac_size_bytes INTEGER;
+ALTER TABLE tracks ADD COLUMN aac_attempted_at TEXT;
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

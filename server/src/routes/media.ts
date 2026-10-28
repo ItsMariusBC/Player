@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AuthEnv } from "../auth/middleware.ts";
 import { getTrack } from "../catalog/tracks.ts";
 import { jsonError } from "../http.ts";
+import { etagMatches, httpDate } from "../http-cache.ts";
 import { parseRange } from "../http-range.ts";
 import type { MediaStorage } from "../media/storage.ts";
 
@@ -17,10 +18,12 @@ const COVER_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-async function sizeOf(path: string): Promise<number | null> {
+const IMMUTABLE = "private, max-age=31536000, immutable";
+
+async function statFile(path: string): Promise<{ size: number; mtimeMs: number } | null> {
   try {
     const info = await stat(path);
-    return info.isFile() ? info.size : null;
+    return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
   } catch {
     return null;
   }
@@ -37,16 +40,40 @@ export function mediaRoutes(
     if (!track || track.status !== "ready") {
       return jsonError(c, 404, "not_found", "Track not found");
     }
-    const file = deps.storage.originalPath(track.id, track.format);
-    const size = await sizeOf(file);
-    if (size === null) return jsonError(c, 404, "not_found", "Track not found");
+    let file = deps.storage.originalPath(track.id, track.format);
+    let type: string = AUDIO_TYPES[track.format];
+    let variant: string = track.format;
+    let info: { size: number; mtimeMs: number } | null = null;
+    if (c.req.query("q") === "light" && track.aacSizeBytes !== null) {
+      info = await statFile(deps.storage.variantPath(track.id));
+      if (info) {
+        file = deps.storage.variantPath(track.id);
+        type = "audio/mp4";
+        variant = "aac";
+      }
+    }
+    info ??= await statFile(file);
+    if (info === null) return jsonError(c, 404, "not_found", "Track not found");
+    const { size } = info;
 
+    const etag = `"${track.sha256}:${variant}"`;
     const headers: Record<string, string> = {
-      "Content-Type": AUDIO_TYPES[track.format],
+      "Content-Type": type,
       "Accept-Ranges": "bytes",
-      "Cache-Control": "private, no-store",
+      "Cache-Control": IMMUTABLE,
+      ETag: etag,
+      "Last-Modified": httpDate(info.mtimeMs),
     };
-    const range = parseRange(c.req.header("range"), size);
+    if (etagMatches(c.req.header("if-none-match"), etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: etag, "Cache-Control": IMMUTABLE },
+      });
+    }
+    const ifRange = c.req.header("if-range");
+    const rangeHeader =
+      ifRange !== undefined && ifRange.trim() !== etag ? undefined : c.req.header("range");
+    const range = parseRange(rangeHeader, size);
     if (range === "unsatisfiable") {
       return new Response(null, {
         status: 416,
@@ -60,7 +87,9 @@ export function mediaRoutes(
     const status = range ? 206 : 200;
 
     if (c.req.method === "HEAD") return new Response(null, { status, headers });
-    const body = Readable.toWeb(createReadStream(file, { start, end })) as ReadableStream;
+    const body = Readable.toWeb(
+      createReadStream(file, { start, end, highWaterMark: 256 * 1024 }),
+    ) as ReadableStream;
     return new Response(body, { status, headers });
   });
 
@@ -72,12 +101,12 @@ export function mediaRoutes(
       return jsonError(c, 404, "not_found", "Cover not found");
     }
     const file = deps.storage.coverPath(track.id, ext as "jpg" | "png" | "webp");
-    const size = await sizeOf(file);
-    if (size === null) return jsonError(c, 404, "not_found", "Cover not found");
+    const info = await statFile(file);
+    if (info === null) return jsonError(c, 404, "not_found", "Cover not found");
     const headers = {
       "Content-Type": type,
-      "Content-Length": String(size),
-      "Cache-Control": "private, max-age=300",
+      "Content-Length": String(info.size),
+      "Cache-Control": c.req.query("v") !== undefined ? IMMUTABLE : "private, max-age=300",
     };
     if (c.req.method === "HEAD") return new Response(null, { status: 200, headers });
     const body = Readable.toWeb(createReadStream(file)) as ReadableStream;

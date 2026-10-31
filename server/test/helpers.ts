@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createImportQueue } from "../src/admin/imports.ts";
+import { createHealth, type StatfsFn } from "../src/health.ts";
+import { createMaintenance } from "../src/admin/maintenance.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
 import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
@@ -23,7 +25,14 @@ export interface TestAppOptions {
   /** Loudness measurement used by imports and the backfill; ffmpeg never runs in tests. */
   measure?: (file: string) => Promise<Loudness | null>;
   /** Whether ffmpeg counts as available (default true). */
-  ffmpegAvailable?: boolean;
+  ffmpegAvailable?: boolean | (() => Promise<boolean>);
+  /** Disk stats used by the health check; defaults to plenty of free space. */
+  statfs?: StatfsFn;
+  /** Disk probe timeout of the health check, in ms. */
+  statfsTimeoutMs?: number;
+  version?: string;
+  /** Migrations the code is expected to have applied (default: all of them). */
+  migrationsExpected?: number;
   /** Leaves `metadata` out of the app deps, as when no provider is configured. */
   withoutMetadata?: boolean;
   /** Import by URL: fetch/resolve for the download; nothing reaches the network. */
@@ -90,7 +99,10 @@ export function createTestApp(opts: TestAppOptions = {}) {
     log: logger,
     now: clock,
     measure: opts.measure ?? (async () => null),
-    ffmpegAvailable: async () => opts.ffmpegAvailable ?? true,
+    ffmpegAvailable:
+      typeof opts.ffmpegAvailable === "function"
+        ? opts.ffmpegAvailable
+        : async () => opts.ffmpegAvailable ?? true,
     download: {
       maxBytes: config.maxUploadBytes,
       fetch:
@@ -100,6 +112,26 @@ export function createTestApp(opts: TestAppOptions = {}) {
         }),
       resolve: opts.download?.resolve ?? (async () => ["93.184.216.34"]),
     },
+  });
+  const maintenance = createMaintenance({ db, storage, now: clock, log: logger });
+  const health = createHealth({
+    db,
+    dataDir: tempDir,
+    statfs:
+      opts.statfs ??
+      (async () => ({
+        bsize: 1024,
+        blocks: 1_000_000_000,
+        bavail: 500_000_000,
+      })),
+    minFreeBytes: config.minFreeBytes,
+    version: opts.version ?? "0.0.0-test",
+    startedAt: clock(),
+    ffmpegAvailable: async () => (await imports.loudnessStatus()).available,
+    maintenance,
+    migrationsExpected: opts.migrationsExpected,
+    statfsTimeoutMs: opts.statfsTimeoutMs,
+    now: clock,
   });
   const metadata = createMetadataSearch({
     providers: opts.metadata?.providers ?? [],
@@ -120,6 +152,8 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    maintenance,
+    health,
     now: clock,
     staticDir: opts.staticDir,
     mount: opts.mount,
@@ -164,6 +198,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    maintenance,
     tempDir,
     cleanup,
     accounts,

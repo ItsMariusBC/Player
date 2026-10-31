@@ -6,6 +6,8 @@ import { createOidcAdapter } from "./auth/oidc.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { createImportQueue, recoverStaleImports } from "./admin/imports.ts";
+import { createHealth } from "./health.ts";
+import { createMaintenance, scheduleMaintenance } from "./admin/maintenance.ts";
 import { createMediaStorage } from "./media/storage.ts";
 import { createProviders } from "./metadata/providers.ts";
 import { createMetadataSearch } from "./metadata/search.ts";
@@ -61,6 +63,11 @@ const oidc = await discoverOidc();
 
 const storage = createMediaStorage(config.dataDir);
 await recoverStaleImports({ db, storage, log });
+const maintenance = createMaintenance({ db, storage, log });
+scheduleMaintenance(maintenance, {
+  intervalMs: config.maintenanceIntervalHours * 3_600_000,
+  log,
+});
 
 // Same relative path from server/src and dist/server.
 function appVersion(): string {
@@ -71,32 +78,53 @@ function appVersion(): string {
     return "0.0.0";
   }
 }
-const userAgent = `Player/${appVersion()} (${config.appUrl.origin})`;
+const startedAt = new Date();
+const version = appVersion();
+const userAgent = `Player/${version} (${config.appUrl.origin})`;
 const metadata = createMetadataSearch({
   providers: createProviders({ fetch: globalThis.fetch, userAgent }),
   now: () => new Date(),
   log,
   userAgent,
 });
+const imports = createImportQueue({
+  db,
+  storage,
+  log,
+  ffmpegPath: config.ffmpegPath,
+  download: { maxBytes: config.maxUploadBytes, userAgent },
+});
+const health = createHealth({
+  db,
+  dataDir: config.dataDir,
+  minFreeBytes: config.minFreeBytes,
+  version,
+  startedAt,
+  ffmpegAvailable: async () => (await imports.loudnessStatus()).available,
+  maintenance,
+});
 const app = createApp({
   config,
   db,
   oidc,
   storage,
-  imports: createImportQueue({
-    db,
-    storage,
-    log,
-    ffmpegPath: config.ffmpegPath,
-    download: { maxBytes: config.maxUploadBytes, userAgent },
-  }),
+  imports,
+  health,
   metadata,
+  maintenance,
   staticDir: "dist",
   log,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) =>
   log("listening", { port: info.port }),
 );
+
+// Not awaited: a slow pass (large data directory) must not delay readiness.
+void maintenance
+  .run()
+  .catch((error) =>
+    log("maintenance.failed", { error: error instanceof Error ? error.name : "unknown" }),
+  );
 
 function shutdown() {
   server.close(() => {

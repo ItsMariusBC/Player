@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  formatBytes,
+  healthLabel,
+  maintenanceLabel,
   batchResultLabel,
   selectionLabel,
   metadataResultsNotice,
@@ -221,5 +224,79 @@ describe("batch labels", () => {
       "1 titre supprimé, 1 introuvable, 3 échecs",
     );
     expect(batchResultLabel({ updated: 2, missing: 0, failed: 0 })).toBe("2 titres mis à jour");
+  });
+});
+
+describe("system labels", () => {
+  const report = {
+    status: "ok",
+    reasons: [],
+    version: "1.2.3",
+    uptimeSeconds: 10,
+    migrations: { applied: 6, expected: 6 },
+    disk: { freeBytes: Math.round(12.4 * 1024 ** 3), totalBytes: 100 * 1024 ** 3 },
+    counts: { tracks: 1, importsProcessing: 0, requestsPending: 0 },
+    ffmpeg: { available: true },
+    maintenance: { lastRunAt: null, lastResult: null },
+  } as const;
+
+  test("formatBytes", () => {
+    expect(formatBytes(0)).toBe("0 o");
+    expect(formatBytes(512)).toBe("512 o");
+    expect(formatBytes(512 * 1024 ** 2)).toBe("512 Mo");
+    expect(formatBytes(1.2 * 1024 ** 3)).toBe("1,2 Go");
+    expect(formatBytes(2 * 1024 ** 3)).toBe("2 Go");
+  });
+
+  test("healthLabel", () => {
+    expect(healthLabel({ ...report, reasons: [...report.reasons] })).toBe(
+      "Système : v1.2.3 · 12,4 Go libres · migrations 6/6",
+    );
+    expect(
+      healthLabel({
+        ...report,
+        status: "degraded",
+        reasons: ["low_disk", "migrations_pending"],
+        migrations: { applied: 5, expected: 6 },
+      }),
+    ).toBe(
+      "Système : v1.2.3 · 12,4 Go libres · migrations 5/6 · dégradé : espace disque faible, migrations en attente",
+    );
+    expect(
+      healthLabel({ ...report, reasons: ["data_dir_unavailable"], status: "degraded", disk: null }),
+    ).toBe(
+      "Système : v1.2.3 · espace disque inconnu · migrations 6/6 · dégradé : dossier de données inaccessible",
+    );
+  });
+
+  test("healthLabel maps db_unavailable and shows unknown codes raw", () => {
+    expect(
+      healthLabel({
+        ...report,
+        status: "degraded",
+        reasons: ["db_unavailable", "mystery" as never],
+      }),
+    ).toBe(
+      "Système : v1.2.3 · 12,4 Go libres · migrations 6/6 · dégradé : base de données inaccessible, mystery",
+    );
+  });
+
+  test("maintenanceLabel", () => {
+    expect(maintenanceLabel({ lastRunAt: null, lastResult: null })).toBe(
+      "Entretien : jamais lancé",
+    );
+    const at = new Date(2026, 9, 27, 14, 5).toISOString();
+    expect(
+      maintenanceLabel({
+        lastRunAt: at,
+        lastResult: { orphanMedia: 2, orphanIncoming: 1, prunedImports: 2, durationMs: 5 },
+      }),
+    ).toBe("Entretien : dernière passe 27/10/2026 14:05 (3 orphelins supprimés, 2 imports purgés)");
+    expect(
+      maintenanceLabel({
+        lastRunAt: at,
+        lastResult: { orphanMedia: 1, orphanIncoming: 0, prunedImports: 1, durationMs: 5 },
+      }),
+    ).toBe("Entretien : dernière passe 27/10/2026 14:05 (1 orphelin supprimé, 1 import purgé)");
   });
 });

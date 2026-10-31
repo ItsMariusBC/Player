@@ -102,7 +102,9 @@ Le script importe un dossier de fichiers audio existant (récursif) dans le cata
 docker compose run --rm -v <dossier-de-musique>:/import:ro -v <manifeste.json>:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
 ```
 
-En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue.
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue. Il écrit dans le même `DATA_DIR` que le serveur : le lancer avec `MAINTENANCE_INTERVAL_HOURS=0` ou serveur arrêté, car une passe d'entretien concurrente pourrait voir ses répertoires comme orphelins (le délai de grâce d'1 h `MAINTENANCE_GRACE_MS` ne protège que les répertoires récents).
+
+Santé : `/healthz` est la version légère (migrations et `statfs` du `DATA_DIR` en 2 s au plus, sans comptages ni ffmpeg) ; le détail complet est `GET /api/admin/health` (admin). `503 degraded` signifie « alerter, ne pas redémarrer » : une sonde de vivacité (liveness) ne doit pas pointer dessus, seulement la disponibilité (readiness) et l'alerte.
 
 Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
 
@@ -135,6 +137,7 @@ Après un déploiement, avec Authentik réel :
 9. Après la migration 6 : déposer un dossier contenant des sous-dossiers et des fichiers audio dans la zone de dépôt (ou « Importer un dossier ») : l'arborescence est recréée sous le dossier sélectionné et chaque titre s'y range ; un dossier de plus de 500 fichiers affiche « Trop de fichiers (500 max) » sans rien envoyer.
 10. Importer par URL une adresse locale ou privée (par exemple `https://127.0.0.1/a.mp3` est refusée d'emblée, `https://localhost/a.mp3` échoue) : l'import passe à `failed` avec un message de téléchargement (adresse refusée) ; une URL publique valide vers un WAV ou MP3 donne un titre dans le dossier sélectionné.
 11. Cocher plusieurs titres : « Déplacer vers… » les range dans le dossier choisi, « Artiste… » puis « Appliquer » change l'artiste des deux, « Supprimer » puis « Oui » les retire ; la bannière indique le nombre de titres touchés.
+12. Dans l'onglet Catalogue, sous la ligne « Volume » : la ligne « Système : v<version> · <espace libre> libres · migrations n/n » s'affiche (en rouge avec « dégradé : <raisons> » si `/healthz` répond 503) et la ligne « Entretien : jamais lancé » ou « dernière passe <date> (…) » ; cliquer sur « Lancer l'entretien » met la date à jour. `curl -i http://localhost:8080/healthz` répond `200 ok`.
 
 ### Recette des demandes de sons
 

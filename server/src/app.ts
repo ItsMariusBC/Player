@@ -4,6 +4,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
 import type { ImportQueue } from "./admin/imports.ts";
+import type { Maintenance } from "./admin/maintenance.ts";
+import type { Health } from "./health.ts";
+import { adminHealthRoutes } from "./routes/admin-health.ts";
+import { adminMaintenanceRoutes } from "./routes/admin-maintenance.ts";
 import { adminFolderRoutes } from "./routes/admin-folders.ts";
 import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
 import { createTrackLocks } from "./admin/track-edit.ts";
@@ -30,6 +34,10 @@ export interface AppDeps {
   imports: ImportQueue;
   /** Metadata lookup; its routes are not mounted when omitted. */
   metadata?: MetadataSearch;
+  /** Maintenance passes; its admin routes are not mounted when omitted. */
+  maintenance?: Maintenance;
+  /** Health: `/healthz` answers from the lightweight `check()`; the admin route is absent when omitted. */
+  health?: Health;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -58,7 +66,14 @@ export function createApp(deps: AppDeps) {
     return jsonError(c, 500, "internal_error", "Unexpected server error");
   });
 
-  app.get("/healthz", (c) => c.text("ok\n"));
+  app.get("/healthz", async (c) => {
+    const report = deps.health ? await deps.health.check() : null;
+    if (report && report.status !== "ok") {
+      c.header("Cache-Control", "no-store");
+      return c.text("degraded\n", 503);
+    }
+    return c.text("ok\n");
+  });
 
   app.use("/api/*", requireRequestedWith);
 
@@ -83,6 +98,15 @@ export function createApp(deps: AppDeps) {
 
   app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
   app.route("/api/admin/loudness", adminLoudnessRoutes({ ...deps, now }, session));
+  if (deps.maintenance) {
+    app.route(
+      "/api/admin/maintenance",
+      adminMaintenanceRoutes({ db: deps.db, maintenance: deps.maintenance, now }, session),
+    );
+  }
+  if (deps.health) {
+    app.route("/api/admin/health", adminHealthRoutes({ health: deps.health }, session));
+  }
   app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
   app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
   // One lock for every route that touches a track's files (PATCH, DELETE, cover, metadata).

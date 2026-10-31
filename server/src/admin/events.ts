@@ -12,7 +12,8 @@ export type AdminAction =
   | "metadata_apply"
   | "request_accept"
   | "request_delete"
-  | "loudness_backfill";
+  | "loudness_backfill"
+  | "maintenance_run";
 
 /** One audit row per admin mutation; detail must never carry a secret. */
 export function recordAdminEvent(

@@ -150,6 +150,24 @@ Après un déploiement, avec Authentik réel :
 6. Côté utilisateur : le bouton « Demander un son » affiche « (1) » ; dans le modal, la ligne « Ajoutée » propose « Écouter », qui lance le titre. Rouvrir le modal remet le compteur à zéro.
 7. Avec un compte `admin`, « Refuser » puis un motif et « Confirmer » : l'utilisateur voit « Refusée : <motif> ».
 
+## Publication de l'image (GHCR)
+
+L'image de production est publiée sur `ghcr.io/itsmariusbc/player`, en `linux/amd64` et `linux/arm64`. Un tag `vX.Y.Z` poussé sur `production` déclenche `release.yml` : Hadolint, construction multi-plateformes, envoi vers GHCR avec les tags `X.Y.Z`, `X.Y`, `sha-<court>` et `latest` (sauf pré-version `vX.Y.Z-rc.1`, qui ne reçoit ni `X.Y` ni `latest`), puis création de la release GitHub avec les notes générées, la référence de l'image et son digest. Le jeton du workflow est limité à `packages: write` pour l'image et `contents: write` pour la release ; aucun secret supplémentaire n'est requis. `workflow_dispatch` reconstruit l'image du commit courant (tag `sha-<court>` seulement, pas de release).
+
+Publier une version :
+
+```sh
+git checkout production && git pull
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+Tant que GitHub Actions reste indisponible (facturation), le même résultat s'obtient depuis un poste avec `scripts/release/publish-image.sh` : il exige d'être sur le commit du tag, un arbre propre et une session `docker login ghcr.io` ouverte avec un jeton `write:packages` (`gh auth refresh -h github.com -s write:packages,read:packages` puis `gh auth token | docker login ghcr.io -u <compte> --password-stdin`). `DRY_RUN=1` construit l'image localement sans l'envoyer. La release GitHub se crée ensuite avec `gh release create v0.1.0 --verify-tag --generate-notes`.
+
+Déployer : `docker pull ghcr.io/itsmariusbc/player:0.1.0`, puis la configuration de la section Déploiement (variables `.env`, volume `/data`). Préférer le tag exact `X.Y.Z` à `latest` en production pour un retour arrière reproductible.
+
+Le paquet GHCR est privé par défaut comme le dépôt ; un hôte de déploiement doit se connecter à `ghcr.io` avec un jeton `read:packages`.
+
 ## Promotion et retour arrière
 
 Ouvrir une PR de `developpment` vers `production`, attendre `CI required`, puis fusionner. Les deux branches exigent ce contrôle à jour et la résolution des conversations ; les force-push et suppressions sont refusés. Aucun autre approbateur n’est imposé sur ce dépôt personnel.

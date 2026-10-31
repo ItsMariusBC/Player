@@ -45,6 +45,19 @@ CREATE INDEX song_requests_status_created ON song_requests(status, created_at);
 CREATE INDEX song_requests_user ON song_requests(user_id);
 `,
   },
+  {
+    id: 4,
+    sql: `
+ALTER TABLE tracks ADD COLUMN loudness_lufs REAL;
+ALTER TABLE tracks ADD COLUMN true_peak_dbtp REAL;
+`,
+  },
+  {
+    id: 5,
+    sql: `
+ALTER TABLE tracks ADD COLUMN loudness_measured_at TEXT;
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

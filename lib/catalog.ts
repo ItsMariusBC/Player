@@ -1,6 +1,7 @@
 // lib/catalog.ts
 // Client side of GET /api/catalog: wire types, media URLs and the flattened queue.
 import { api } from "@/lib/api";
+import { replayGain } from "@/lib/loudness";
 
 // Mirrors of server/src/catalog/types.ts (FolderNode, TrackDto): keep both in sync.
 export interface FolderNode {
@@ -20,6 +21,10 @@ export interface TrackDto {
   format: "flac" | "mp3" | "wav";
   hasCover: boolean;
   position: number;
+  /** Integrated loudness in LUFS; null while unmeasured (or from a server that does not send it). */
+  loudnessLufs: number | null;
+  /** True peak in dBTP; null while unmeasured. */
+  truePeakDbtp: number | null;
   /** ISO timestamp; bumped by every edit, including a cover change (cache busting with ?v=). */
   updatedAt: string;
 }
@@ -45,6 +50,8 @@ export interface Song {
   folderPath: string[];
   /** The track's updatedAt, carried so a replaced cover gets a new URL. */
   updatedAt: string;
+  /** Playback gain in dB that evens out loudness (0 for an unmeasured track). */
+  gainDb: number;
 }
 
 export const mediaUrl = (id: string) => `/api/media/${encodeURIComponent(id)}`;
@@ -67,6 +74,8 @@ function toSong(track: TrackDto, folderId: string | null, folderPath: string[]):
     folderId,
     folderPath,
     updatedAt: track.updatedAt,
+    // Older servers omit the fields: treat them as unmeasured.
+    gainDb: replayGain({ lufs: track.loudnessLufs ?? null, truePeakDbtp: track.truePeakDbtp ?? null }),
   };
   if (track.hasCover) song.picture = coverUrl(track.id, track.updatedAt);
   return song;

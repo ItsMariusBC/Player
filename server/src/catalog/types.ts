@@ -17,6 +17,11 @@ export interface TrackRecord {
   sha256: string;
   coverExt: string | null;
   status: "ready" | "failed";
+  /** Integrated loudness (LUFS); null when not measured. */
+  loudnessLufs: number | null;
+  truePeakDbtp: number | null;
+  /** Last measurement attempt (success or not); null = never tried. Not exposed in the DTO. */
+  loudnessMeasuredAt: Date | null;
   position: number;
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +77,9 @@ export interface TrackDto {
   durationMs: number | null;
   format: "flac" | "mp3" | "wav";
   hasCover: boolean;
+  /** Null when not measured; the client then plays the track at 0 dB. */
+  loudnessLufs: number | null;
+  truePeakDbtp: number | null;
   position: number;
   /** ISO timestamp; bumped by every edit, including a cover change (cache busting with ?v=). */
   updatedAt: string;

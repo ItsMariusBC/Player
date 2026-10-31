@@ -33,6 +33,8 @@ const track = (id: string, folderId: string | null, position: number, title = id
   durationMs: null,
   format: "flac",
   hasCover: false,
+  loudnessLufs: null,
+  truePeakDbtp: null,
   position,
   updatedAt: "2026-10-27T00:00:00.000Z",
 });

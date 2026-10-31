@@ -8,6 +8,7 @@ import { createSession } from "../src/auth/sessions.ts";
 import { upsertUser } from "../src/auth/users.ts";
 import { loadConfig } from "../src/config.ts";
 import { openDatabase } from "../src/db.ts";
+import type { Loudness } from "../src/media/loudness.ts";
 import { createMediaStorage } from "../src/media/storage.ts";
 import { createMetadataSearch, type MetadataProvider } from "../src/metadata/search.ts";
 import { migrate } from "../src/migrations.ts";
@@ -19,6 +20,10 @@ export interface TestAppOptions {
   staticDir?: string;
   env?: Record<string, string>;
   mount?: AppDeps["mount"];
+  /** Loudness measurement used by imports and the backfill; ffmpeg never runs in tests. */
+  measure?: (file: string) => Promise<Loudness | null>;
+  /** Whether ffmpeg counts as available (default true). */
+  ffmpegAvailable?: boolean;
   /** Leaves `metadata` out of the app deps, as when no provider is configured. */
   withoutMetadata?: boolean;
   /** Metadata providers and the cover guard's fetch/resolve; nothing reaches the network. */
@@ -74,7 +79,14 @@ export function createTestApp(opts: TestAppOptions = {}) {
 
   const log: LogEntry[] = [];
   const logger = (event: string, data?: Record<string, unknown>) => log.push({ event, data });
-  const imports = createImportQueue({ db, storage, log: logger, now: clock });
+  const imports = createImportQueue({
+    db,
+    storage,
+    log: logger,
+    now: clock,
+    measure: opts.measure ?? (async () => null),
+    ffmpegAvailable: async () => opts.ffmpegAvailable ?? true,
+  });
   const metadata = createMetadataSearch({
     providers: opts.metadata?.providers ?? [],
     now: clock,

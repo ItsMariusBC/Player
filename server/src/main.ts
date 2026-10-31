@@ -83,7 +83,7 @@ const app = createApp({
   db,
   oidc,
   storage,
-  imports: createImportQueue({ db, storage, log }),
+  imports: createImportQueue({ db, storage, log, ffmpegPath: config.ffmpegPath }),
   metadata,
   staticDir: "dist",
   log,

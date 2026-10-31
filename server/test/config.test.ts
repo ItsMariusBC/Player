@@ -17,6 +17,7 @@ describe("loadConfig", () => {
     const config = loadConfig(minimal);
     assert.equal(config.port, 8080);
     assert.equal(config.dataDir, "/data");
+    assert.equal(config.ffmpegPath, "ffmpeg");
     assert.equal(config.oidc.groupAdmin, "admin");
     assert.equal(config.session.ttlMs, 43_200_000);
     assert.equal(config.session.groupsRecheckMs, 900_000);

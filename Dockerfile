@@ -12,6 +12,7 @@ COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --non-interactive --production \
   && yarn cache clean
 COPY --from=build /app/dist ./dist
+RUN apk add --no-cache ffmpeg
 RUN addgroup -g 101 player \
   && adduser -D -u 101 -G player player \
   && mkdir -p /data \

@@ -14,6 +14,9 @@ interface TrackRow {
   sha256: string;
   cover_ext: string | null;
   status: "ready" | "failed";
+  loudness_lufs: number | null;
+  true_peak_dbtp: number | null;
+  loudness_measured_at: string | null;
   position: number;
   created_at: string;
   updated_at: string;
@@ -32,6 +35,9 @@ function toRecord(row: TrackRow): TrackRecord {
     sha256: row.sha256,
     coverExt: row.cover_ext,
     status: row.status,
+    loudnessLufs: row.loudness_lufs,
+    truePeakDbtp: row.true_peak_dbtp,
+    loudnessMeasuredAt: row.loudness_measured_at ? new Date(row.loudness_measured_at) : null,
     position: row.position,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -76,14 +82,21 @@ function nextPosition(db: DatabaseSync, folderId: string | null): number {
 /** Appends a track at the end of its folder. A duplicate sha256 throws the SQLite unique error. */
 export function insertTrack(
   db: DatabaseSync,
-  input: Omit<TrackRecord, "createdAt" | "updatedAt" | "position">,
+  input: Omit<
+    TrackRecord,
+    "createdAt" | "updatedAt" | "position" | "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt"
+  > &
+    Partial<Pick<TrackRecord, "loudnessLufs" | "truePeakDbtp" | "loudnessMeasuredAt">>,
   now: Date,
 ): TrackRecord {
+  const loudnessLufs = input.loudnessLufs ?? null;
+  const truePeakDbtp = input.truePeakDbtp ?? null;
+  const loudnessMeasuredAt = input.loudnessMeasuredAt ?? null;
   const position = nextPosition(db, input.folderId);
   const iso = now.toISOString();
   db.prepare(
-    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tracks (id, folder_id, title, artist, album, duration_ms, format, size_bytes, sha256, cover_ext, status, loudness_lufs, true_peak_dbtp, loudness_measured_at, position, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.folderId,
@@ -96,11 +109,22 @@ export function insertTrack(
     input.sha256,
     input.coverExt,
     input.status,
+    loudnessLufs,
+    truePeakDbtp,
+    loudnessMeasuredAt?.toISOString() ?? null,
     position,
     iso,
     iso,
   );
-  return { ...input, position, createdAt: now, updatedAt: now };
+  return {
+    ...input,
+    loudnessLufs,
+    truePeakDbtp,
+    loudnessMeasuredAt,
+    position,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 const PATCH_COLUMNS = {
@@ -134,6 +158,28 @@ export function updateTrack(
   values.push(now.toISOString(), id);
   db.prepare(`UPDATE tracks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
   return requireTrack(db, id);
+}
+
+/**
+ * Records a measurement attempt: always stamps `loudness_measured_at`, stores the values when
+ * present. `updated_at` is left alone (it drives client cover caching). False when the track is gone.
+ */
+export function updateTrackLoudness(
+  db: DatabaseSync,
+  id: string,
+  loudness: { lufs: number; truePeakDbtp: number | null } | null,
+  now: Date,
+): boolean {
+  const result = loudness
+    ? db
+        .prepare(
+          "UPDATE tracks SET loudness_lufs = ?, true_peak_dbtp = ?, loudness_measured_at = ? WHERE id = ?",
+        )
+        .run(loudness.lufs, loudness.truePeakDbtp, now.toISOString(), id)
+    : db
+        .prepare("UPDATE tracks SET loudness_measured_at = ? WHERE id = ?")
+        .run(now.toISOString(), id);
+  return Number(result.changes) > 0;
 }
 
 function writePositions(db: DatabaseSync, ids: string[]): void {
@@ -202,6 +248,8 @@ export function toTrackDto(t: TrackRecord): TrackDto {
     durationMs: t.durationMs,
     format: t.format,
     hasCover: t.coverExt !== null,
+    loudnessLufs: t.loudnessLufs,
+    truePeakDbtp: t.truePeakDbtp,
     position: t.position,
     updatedAt: t.updatedAt.toISOString(),
   };

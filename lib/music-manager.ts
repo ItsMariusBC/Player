@@ -11,6 +11,7 @@ import {
   TrackDirection,
 } from "@/lib/queue-manager";
 import { createEmitter, Listener } from "@/lib/events";
+import { dbToLinear } from "@/lib/loudness";
 import { nextToPreload } from "@/lib/preload";
 
 export type PlayerEvent =
@@ -74,6 +75,16 @@ export function createMusicManager(): MusicManager {
   let context: AudioContext | null = null;
   let analyser: AnalyserNode | null = null;
   const sources: MediaElementAudioSourceNode[] = [];
+  // One gain node per element (source -> gain -> analyser). The wanted linear gain is
+  // kept apart so it can be set before the nodes exist and applied on their creation.
+  const gainNodes = new Map<HTMLAudioElement, GainNode>();
+  const wantedGain = new Map<HTMLAudioElement, number>();
+  const setElementGain = (el: HTMLAudioElement, gainDb: number) => {
+    const linear = dbToLinear(gainDb);
+    wantedGain.set(el, linear);
+    const node = gainNodes.get(el);
+    if (node) node.gain.value = linear;
+  };
 
   // Placeholder analyser so the visualizer can mount before any interaction.
   const Ctor = getAudioContextCtor();
@@ -88,7 +99,11 @@ export function createMusicManager(): MusicManager {
         analyser = context.createAnalyser();
         for (const el of [current, standby]) {
           const source = context.createMediaElementSource(el);
-          source.connect(analyser);
+          const gain = context.createGain();
+          gain.gain.value = wantedGain.get(el) ?? 1;
+          source.connect(gain);
+          gain.connect(analyser);
+          gainNodes.set(el, gain);
           sources.push(source);
         }
         analyser.connect(context.destination);
@@ -136,6 +151,8 @@ export function createMusicManager(): MusicManager {
       }
       return;
     }
+    // Set the gain first: the track may already be in place with a gain that changed since.
+    setElementGain(standby, next.gainDb);
     if (standbyUrl === next.url) return;
     standby.src = next.url;
     standby.preload = "auto";
@@ -302,8 +319,10 @@ export function createMusicManager(): MusicManager {
         standby = previous;
         standbyUrl = null;
         emptyElement(standby);
+        setElementGain(current, song.gainDb);
         if (current.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) armPreload();
       } else {
+        setElementGain(current, song.gainDb);
         current.src = song.url;
         current.load();
       }

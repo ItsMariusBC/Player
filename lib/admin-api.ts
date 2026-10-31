@@ -236,3 +236,32 @@ export function listImports(limit?: number): Promise<ImportDto[]> {
 export function getLimits(): Promise<{ maxUploadBytes: number }> {
   return api<{ maxUploadBytes: number }>("/api/admin/limits");
 }
+
+/** Loudness measurement progress of the ready tracks (GET /api/admin/loudness). */
+export interface LoudnessStatus {
+  total: number;
+  measured: number;
+  /** Attempted without a value (silent or unreadable track). */
+  failed: number;
+  /** Never attempted. */
+  pending: number;
+  /** A backfill pass is in progress. */
+  running: boolean;
+  /** false when the server cannot run ffmpeg. */
+  available: boolean;
+}
+
+export function getLoudnessStatus(): Promise<LoudnessStatus> {
+  return api<LoudnessStatus>("/api/admin/loudness");
+}
+
+/** Result of POST /api/admin/loudness/backfill: queued is 0 when a pass was already running. */
+export interface BackfillResult {
+  queued: number;
+  running: boolean;
+}
+
+/** Starts a backfill pass over the unmeasured tracks (409 ffmpeg_unavailable without ffmpeg). */
+export function backfillLoudness(): Promise<BackfillResult> {
+  return api<BackfillResult>("/api/admin/loudness/backfill", { method: "POST" });
+}

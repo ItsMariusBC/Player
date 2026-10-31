@@ -13,6 +13,7 @@ import { FolderTree } from "@/components/admin/folder-tree";
 import { RequestList } from "@/components/admin/request-list";
 import { MetadataDialog } from "@/components/admin/metadata-dialog";
 import { TrackEditor } from "@/components/admin/track-editor";
+import { LoudnessStatus } from "@/components/admin/loudness-status";
 import { TrackTable } from "@/components/admin/track-table";
 import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
 import * as adminApi from "@/lib/admin-api";
@@ -528,6 +529,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
               onSelect={selectTrack}
               onTrackMenu={(id, x, y) => setMenu({ kind: "track", id, x, y, step: "main" })}
             />
+          </div>
+          <div className="shrink-0">
+            <LoudnessStatus onError={showError} />
           </div>
           <div className="shrink-0">
             <UploadZone

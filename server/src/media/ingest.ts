@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { findTrackBySha, insertTrack } from "../catalog/tracks.ts";
 import type { TrackRecord } from "../catalog/types.ts";
+import type { Loudness } from "./loudness.ts";
 import { probeFile, UnsupportedFormatError, type ProbeResult } from "./probe.ts";
 import type { MediaStorage } from "./storage.ts";
 
@@ -24,12 +25,14 @@ export interface IngestInput {
   folderId?: () => string | null;
   /** Lazy, same rule. An explicit cover (non-null) wins over the embedded one. */
   cover?: () => Promise<ProbeResult["cover"]>;
+  /** Loudness measurement; injected so tests never run ffmpeg. Omitted: not measured. Must not throw. */
+  measure?: (file: string) => Promise<Loudness | null>;
   now: Date;
 }
 
 /**
  * The one pipeline shared by the admin queue and the migration script:
- * probe, dedupe by sha256, publish the file, insert the row. Unsupported files and duplicates
+ * probe, measure loudness, dedupe by sha256, publish the file, insert the row. Unsupported files and duplicates
  * clean their incoming directory; unexpected errors are thrown and left to the caller.
  */
 export async function ingestFile(input: IngestInput): Promise<IngestResult> {
@@ -48,6 +51,12 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
   if (existing) {
     await storage.removeIncoming(importId);
     return { kind: "duplicate", trackId: existing.id };
+  }
+  let loudness: Loudness | null = null;
+  try {
+    loudness = (await input.measure?.(file)) ?? null;
+  } catch {
+    // A failed measurement never fails the import; the backfill can retry later.
   }
   const cover = (await input.cover?.()) ?? probe.cover;
   const folderId = input.folderId?.() ?? null;
@@ -68,6 +77,9 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
         sha256: probe.sha256,
         coverExt: cover?.ext ?? null,
         status: "ready",
+        loudnessLufs: loudness?.lufs ?? null,
+        truePeakDbtp: loudness?.truePeakDbtp ?? null,
+        loudnessMeasuredAt: input.measure ? now : null,
       },
       now,
     );

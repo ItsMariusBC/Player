@@ -2,6 +2,7 @@ export interface AppConfig {
   appUrl: URL;
   port: number;
   dataDir: string;
+  ffmpegPath: string;
   nodeEnv: "development" | "production" | "test";
   oidc: {
     issuer: string;
@@ -132,6 +133,7 @@ export function loadConfig(env: Env): AppConfig {
     appUrl,
     port: parsePort(env),
     dataDir: optional(env, "DATA_DIR", "/data"),
+    ffmpegPath: optional(env, "FFMPEG_PATH", "ffmpeg"),
     nodeEnv,
     oidc: {
       issuer: required(env, "OIDC_ISSUER"),

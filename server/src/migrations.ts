@@ -25,6 +25,26 @@ CREATE TABLE admin_events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES
 CREATE TABLE favorites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, created_at TEXT NOT NULL, PRIMARY KEY (user_id, track_id));
 `,
   },
+  {
+    id: 3,
+    sql: `
+CREATE TABLE song_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL DEFAULT '',
+  album TEXT,
+  year INTEGER,
+  source TEXT NOT NULL CHECK (source IN ('musicbrainz','deezer','itunes','manual')),
+  cover_url TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX song_requests_status_created ON song_requests(status, created_at);
+CREATE INDEX song_requests_user ON song_requests(user_id);
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

@@ -10,6 +10,7 @@ import { PanelButton } from "@/components/visualizer-panel";
 import { buttonVariants } from "@/components/ui/button";
 import { ContextMenu, type MenuItem } from "@/components/admin/context-menu";
 import { FolderTree } from "@/components/admin/folder-tree";
+import { RequestList } from "@/components/admin/request-list";
 import { MetadataDialog } from "@/components/admin/metadata-dialog";
 import { TrackEditor } from "@/components/admin/track-editor";
 import { TrackTable } from "@/components/admin/track-table";
@@ -25,7 +26,9 @@ import {
 } from "@/lib/admin-format";
 import { performLogout } from "@/lib/api";
 import { useAdminCatalog } from "@/lib/hooks/use-admin-catalog";
+import { useAdminRequests } from "@/lib/hooks/use-admin-requests";
 import { useImportQueue } from "@/lib/hooks/use-import-queue";
+import { acceptRequest, deleteRequest } from "@/lib/requests-api";
 import { entryLabel } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
@@ -53,6 +56,8 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     setBanner(errorMessage(error));
   }, []);
   const { catalog, refreshAdmin } = useAdminCatalog(showError);
+  const { requests, pending, refresh: refreshRequests } = useAdminRequests(showError);
+  const [view, setView] = useState<"catalog" | "requests">("catalog");
   const folders = catalog?.folders ?? [];
   const tracks = catalog?.tracks ?? [];
 
@@ -153,6 +158,32 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
     },
     [refreshAdmin, onCatalogChanged, showError],
   );
+
+  // Request actions only touch the requests list: it is reloaded even when the action fails
+  // (the request may be gone or already handled), and the catalogues stay as they are.
+  const runRequestAction = useCallback(
+    async (action: () => Promise<unknown>) => {
+      setInFlight((n) => n + 1);
+      try {
+        await action();
+      } catch (error) {
+        showError(error);
+      } finally {
+        await refreshRequests();
+        setInFlight((n) => n - 1);
+      }
+    },
+    [refreshRequests, showError],
+  );
+
+  const acceptOne = (requestId: string) => void runRequestAction(() => acceptRequest(requestId));
+
+  const deleteOne = (requestId: string) => void runRequestAction(() => deleteRequest(requestId));
+
+  // The list may have changed since the last visit (new requests from the player).
+  useEffect(() => {
+    if (view === "requests") void refreshRequests();
+  }, [view, refreshRequests]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -369,7 +400,50 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
       transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.9 }}
     >
       <header className="flex items-center justify-between gap-4">
-        <h2 className="text-sm uppercase tracking-widest text-purple-200/70">Administration</h2>
+        <div className="flex items-center gap-6">
+          <div
+            role="tablist"
+            aria-label="Vue"
+            className="flex items-center gap-4"
+            onKeyDown={(event) => {
+              const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+              if (!keys.includes(event.key)) return;
+              event.preventDefault();
+              let next: "catalog" | "requests";
+              if (event.key === "Home") next = "catalog";
+              else if (event.key === "End") next = "requests";
+              else next = view === "catalog" ? "requests" : "catalog";
+              setView(next);
+              document.getElementById(`admin-tab-${next}`)?.focus();
+            }}
+          >
+            {(
+              [
+                ["catalog", "Catalogue"],
+                ["requests", `Demandes (${pending})`],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                id={`admin-tab-${key}`}
+                type="button"
+                role="tab"
+                aria-selected={view === key}
+                aria-controls={`admin-panel-${key}`}
+                tabIndex={view === key ? 0 : -1}
+                className={cn(
+                  "border-b-2 py-1 text-sm uppercase tracking-widest transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60",
+                  view === key
+                    ? "border-purple-200 text-purple-50"
+                    : "border-transparent text-purple-200/50 hover:text-purple-100",
+                )}
+                onClick={() => setView(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -401,7 +475,31 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
         </div>
       )}
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden">
+      {view === "requests" && (
+        <div
+          role="tabpanel"
+          id="admin-panel-requests"
+          aria-labelledby="admin-tab-requests"
+          className="mt-4 min-h-0 flex-1 overflow-y-auto"
+        >
+          <RequestList
+            requests={requests}
+            busy={inFlight > 0}
+            onAccept={(request) => acceptOne(request.id)}
+            onDelete={(request) => deleteOne(request.id)}
+          />
+        </div>
+      )}
+
+      <div
+        role="tabpanel"
+        id="admin-panel-catalog"
+        aria-labelledby="admin-tab-catalog"
+        className={cn(
+          "mt-4 min-h-0 flex-1 flex-col gap-6 overflow-y-auto md:flex-row md:overflow-hidden",
+          view === "catalog" ? "flex" : "hidden",
+        )}
+      >
         <div className="shrink-0 md:w-64 md:overflow-y-auto">
           <FolderTree
             folders={folders}
@@ -494,7 +592,7 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   );
 }
 
-function CloseIcon() {
+export function CloseIcon() {
   return (
     <svg
       width={14}

@@ -1,19 +1,20 @@
 // components/song-list.tsx
-// Queue shown as the catalogue tree. Folders nest (indented per level) and
-// collapse; the folders holding the current track open themselves. Each level
-// lists its subfolders, then its own tracks: the queue order of flattenCatalog.
+// Queue shown as the catalogue tree. Folders nest (indented per level) and work as an
+// accordion: opening one closes its siblings, and the folders holding the current track
+// open themselves. Each level lists its subfolders, then its own tracks: the queue order
+// of flattenCatalog.
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, m } from "framer-motion";
 import { MusicManager } from "@/lib/music-manager";
 import { PlaybackController } from "@/lib/playback-controller";
 import { QueueItem } from "@/lib/queue-manager";
 import { usePlaybackState } from "@/lib/hooks/use-playback-state";
-import { type FolderNode, folderAncestors } from "@/lib/catalog";
+import { type FolderNode, folderAncestors, openFolderPath } from "@/lib/catalog";
 import { cn } from "@/lib/cn";
 
 interface TreeContext {
   songsByFolder: Map<string | null, QueueItem[]>;
-  collapsed: Set<string>;
+  open: Set<string>;
   currentId: string | undefined;
   currentPath: string[];
   onToggle: (folderId: string) => void;
@@ -52,29 +53,26 @@ export function SongList({
     [ancestors, currentFolderId],
   );
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const initial = new Set(ancestors.keys());
-    for (const id of currentPath) initial.delete(id);
-    return initial;
-  });
+  // Open folders; everything else is collapsed.
+  const [open, setOpen] = useState<Set<string>>(() => new Set(currentPath));
 
-  // The folders on the path of the track being played always open.
+  // The folders on the path of the track being played always open (closing their siblings).
   useEffect(() => {
     if (currentPath.length === 0) return;
-    setCollapsed((prev) => {
-      if (!currentPath.some((id) => prev.has(id))) return prev;
-      const next = new Set(prev);
-      for (const id of currentPath) next.delete(id);
-      return next;
+    setOpen((prev) => {
+      if (currentPath.every((id) => prev.has(id))) return prev;
+      return openFolderPath(prev, currentPath, ancestors);
     });
-  }, [currentPath]);
+  }, [currentPath, ancestors]);
 
   const toggle = (folderId: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
+    setOpen((prev) => {
+      if (prev.has(folderId)) {
+        const next = new Set(prev);
+        next.delete(folderId);
+        return next;
+      }
+      return openFolderPath(prev, [folderId], ancestors);
     });
 
   if (songs.length === 0) {
@@ -88,7 +86,7 @@ export function SongList({
 
   const context: TreeContext = {
     songsByFolder,
-    collapsed,
+    open,
     currentId: currentSong?.id,
     currentPath,
     onToggle: toggle,
@@ -113,7 +111,7 @@ export function SongList({
 }
 
 function Folder({ node, context }: { node: FolderNode; context: TreeContext }) {
-  const open = !context.collapsed.has(node.id);
+  const open = context.open.has(node.id);
   const holdsCurrent = context.currentPath.includes(node.id);
   const songs = context.songsByFolder.get(node.id) ?? [];
   const count = countTracks(node, context.songsByFolder);

@@ -6,7 +6,7 @@ import { migrate } from "../src/migrations.ts";
 describe("database", () => {
   it("applies migrations once and is idempotent", () => {
     const db = openDatabase(":memory:");
-    assert.equal(migrate(db), 2);
+    assert.equal(migrate(db), 3);
     assert.equal(migrate(db), 0);
     db.close();
   });
@@ -79,6 +79,26 @@ describe("catalogue tables", () => {
     insert.run("b", null, "B");
     insert.run("a1", "a", "Rock");
     insert.run("b1", "b", "Rock");
+    db.close();
+  });
+});
+
+describe("song_requests table", () => {
+  it("is created by migration 3 and rejects an unknown source or status", () => {
+    const db = openDatabase(":memory:");
+    migrate(db);
+    db.prepare(
+      "INSERT INTO users (id, issuer, subject, created_at, last_seen_at) VALUES ('u', 'i', 's', 'a', 'a')",
+    ).run();
+    const insert = db.prepare(
+      "INSERT INTO song_requests (id, user_id, title, source, status, created_at, updated_at) VALUES (?, 'u', 'T', ?, ?, 'a', 'a')",
+    );
+    insert.run("ok", "manual", "pending");
+    assert.throws(() => insert.run("bad1", "spotify", "pending"), /CHECK constraint/);
+    assert.throws(() => insert.run("bad2", "manual", "done"), /CHECK constraint/);
+    db.prepare("DELETE FROM users WHERE id = 'u'").run();
+    const count = db.prepare("SELECT COUNT(*) AS n FROM song_requests").get() as { n: number };
+    assert.equal(count.n, 0);
     db.close();
   });
 });

@@ -8,12 +8,14 @@ import { createPlayerRuntime, PlayerRuntime } from "@/lib/player-runtime";
 import { useSongGradient } from "@/lib/hooks/use-song-gradient";
 import { useCatalog } from "@/lib/hooks/use-catalog";
 import { type Catalog, flattenCatalog } from "@/lib/catalog";
+import { bindResumeSaver, readResumeState, resumeTarget } from "@/lib/resume-state";
 import { VisualizerCard, VisualizerStage } from "@/components/visualizer-panel";
 import { AnimatePresence, LazyMotion, MotionConfig, m } from "framer-motion";
 
 const loadMotionFeatures = () => import("@/lib/motion-features").then((mod) => mod.default);
 import { NowPlaying } from "@/components/now-playing";
 import { SongList } from "@/components/song-list";
+import { SongRequestDialog } from "@/components/song-request-dialog";
 import { MiniPlayer } from "@/components/mini-player";
 import { UpNext } from "@/components/up-next";
 import { ProgressBar } from "@/components/progress-bar";
@@ -35,7 +37,9 @@ export default function MusicPlayer() {
   // Admin panel: unmounts the rest of the UI the same way.
   const { role } = useSessionInfo();
   const [adminOpen, setAdminOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
   const closeAdmin = useCallback(() => setAdminOpen(false), []);
+  const closeRequest = useCallback(() => setRequestOpen(false), []);
   const focusMode = visualizerExpanded || adminOpen;
   // Server catalogue. `queued` is the catalogue currently loaded in the queue:
   // the player renders only once the first one is in, so no empty-queue flash.
@@ -55,9 +59,24 @@ export default function MusicPlayer() {
     document.querySelector<HTMLElement>("[data-admin-button]")?.focus();
   }, [adminOpen]);
 
+  // Same for « Demander un son », unmounted while its stage is open.
+  const requestWasOpen = useRef(false);
+  useEffect(() => {
+    if (requestOpen) {
+      requestWasOpen.current = true;
+      return;
+    }
+    if (!requestWasOpen.current) return;
+    requestWasOpen.current = false;
+    document.querySelector<HTMLElement>("[data-request-button]")?.focus();
+  }, [requestOpen]);
+
   const paused = musicManager?.isPaused() ?? true;
   const currentSong = musicManager?.queueManager.getCurrentSong();
   const gradient = useSongGradient(currentSong);
+
+  const restoredRef = useRef(false);
+  const unbindResumeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const player = createPlayerRuntime({
@@ -70,6 +89,9 @@ export default function MusicPlayer() {
     setRuntime(player);
 
     return () => {
+      unbindResumeRef.current?.();
+      unbindResumeRef.current = null;
+      restoredRef.current = false;
       unsubscribe();
       player.destroy();
     };
@@ -79,9 +101,24 @@ export default function MusicPlayer() {
   // queue keeps the current track by id (see QueueManager.setSongs).
   useEffect(() => {
     if (!runtime || !catalog) return;
-    runtime.music.queueManager.setSongs(flattenCatalog(catalog));
+    const { music } = runtime;
+    const songs = flattenCatalog(catalog);
+    // Restore from the first NON-EMPTY catalogue only: an empty one says nothing
+    // about the resumed track. The target index goes into setSongs itself, so the
+    // queue loads the resumed track directly (no first request for track 0, no
+    // "jump" notification). Never autoplay: the activation overlay stays.
+    const restoring = !restoredRef.current && songs.length > 0;
+    const target = restoring ? resumeTarget(songs, readResumeState(), Date.now()) : null;
+    music.queueManager.setSongs(songs, target?.index);
+    if (restoring) {
+      restoredRef.current = true;
+      if (target && target.position > 0) music.setTime(target.position);
+      // Bound after the restore so it is not saved back as position 0.
+      unbindResumeRef.current = bindResumeSaver(music);
+    }
     setQueued(catalog);
   }, [runtime, catalog]);
+
 
   // Effect pour détecter la première interaction de l'utilisateur
   useEffect(() => {
@@ -179,6 +216,9 @@ export default function MusicPlayer() {
             <VisualizerStage analyser={runtime.music.analyser} onClose={closeVisualizer} />
           ) : (
           <div className="w-full max-w-6xl mx-auto">
+            {requestOpen ? (
+              <SongRequestDialog onClose={closeRequest} />
+            ) : (
             <div className="grid md:grid-cols-12 gap-8">
               <div className="md:col-span-8">
                 <div>
@@ -190,11 +230,22 @@ export default function MusicPlayer() {
               </div>
               
               <div className="md:col-span-4">
-                <div className="bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px] overflow-y-auto">
-                  <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
+                <div className="flex flex-col bg-purple-800/10 backdrop-blur-xs p-4 rounded-lg md:h-[500px] max-h-[500px]">
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <SongList music={runtime.music} playback={runtime.playback} folders={queued.folders} />
+                  </div>
+                  <button
+                    type="button"
+                    data-request-button=""
+                    className={cn(buttonVariants({ variant: "ghost" }), "shrink-0 w-full mt-3")}
+                    onClick={() => setRequestOpen(true)}
+                  >
+                    Demander un son
+                  </button>
                 </div>
               </div>
             </div>
+            )}
           </div>
           )}
           

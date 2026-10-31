@@ -1,0 +1,295 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { ApiError } from "../../lib/api";
+import {
+  applyMetadata,
+  createFolder,
+  deleteFolder,
+  deleteTrack,
+  getImport,
+  getLimits,
+  listImports,
+  replaceCover,
+  searchMetadata,
+  updateFolder,
+  updateTrack,
+  uploadFile,
+} from "../../lib/admin-api";
+
+const realFetch = globalThis.fetch;
+const realXhr = globalThis.XMLHttpRequest;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  globalThis.XMLHttpRequest = realXhr;
+});
+
+interface Call {
+  url: string;
+  init: RequestInit;
+}
+
+function stubFetch(status: number, body?: unknown) {
+  const calls: Call[] = [];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    if (body === undefined) return new Response(null, { status });
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+const header = (call: Call, name: string) => new Headers(call.init.headers).get(name);
+
+describe("folder calls", () => {
+  test("createFolder posts name and parentId, null included", async () => {
+    const folder = { id: "f", name: "Rock", parentId: null, position: 0 };
+    const calls = stubFetch(201, { folder });
+    expect(await createFolder("Rock", null)).toEqual(folder);
+    expect(calls[0]!.url).toBe("/api/admin/folders");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ name: "Rock", parentId: null });
+    expect(header(calls[0]!, "Content-Type")).toBe("application/json");
+    expect(header(calls[0]!, "X-Requested-With")).toBe("player");
+  });
+
+  test("updateFolder patches the given keys only", async () => {
+    const calls = stubFetch(200, { folder: { id: "a b", name: "X", parentId: null, position: 0 } });
+    await updateFolder("a b", { name: "X" });
+    expect(calls[0]!.url).toBe("/api/admin/folders/a%20b");
+    expect(calls[0]!.init.method).toBe("PATCH");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ name: "X" });
+  });
+
+  test("deleteFolder resolves on 204 and adds force=1 when asked", async () => {
+    const calls = stubFetch(204);
+    await deleteFolder("f");
+    await deleteFolder("f", { force: true });
+    expect(calls.map((c) => [c.init.method, c.url])).toEqual([
+      ["DELETE", "/api/admin/folders/f"],
+      ["DELETE", "/api/admin/folders/f?force=1"],
+    ]);
+  });
+
+  test("a 409 rejects with the server code", async () => {
+    stubFetch(409, { error: { code: "folder_not_empty", message: "Folder is not empty" } });
+    const error = await deleteFolder("f").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("folder_not_empty");
+    expect((error as ApiError).message).toBe("Folder is not empty");
+  });
+});
+
+describe("track calls", () => {
+  test("updateTrack returns the track and tagsWritten", async () => {
+    const calls = stubFetch(200, { track: { id: "t" }, tagsWritten: true });
+    const result = await updateTrack("t", { title: "New", folderId: null });
+    expect(result.tagsWritten).toBe(true);
+    expect(calls[0]!.url).toBe("/api/admin/tracks/t");
+    expect(calls[0]!.init.method).toBe("PATCH");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ title: "New", folderId: null });
+  });
+
+  test("deleteTrack resolves on 204", async () => {
+    const calls = stubFetch(204);
+    expect(await deleteTrack("t")).toBeUndefined();
+    expect(calls[0]!.init.method).toBe("DELETE");
+  });
+
+  test("replaceCover sends the image as the multipart file field", async () => {
+    const calls = stubFetch(200, { hasCover: true });
+    const image = new File([new Uint8Array([1, 2, 3])], "c.png", { type: "image/png" });
+    expect(await replaceCover("t", image)).toEqual({ hasCover: true });
+    expect(calls[0]!.url).toBe("/api/admin/tracks/t/cover");
+    expect(calls[0]!.init.method).toBe("POST");
+    const body = calls[0]!.init.body as FormData;
+    expect((body.get("file") as File).name).toBe("c.png");
+    expect(header(calls[0]!, "Content-Type")).toBeNull();
+  });
+});
+
+describe("import calls", () => {
+  test("getLimits reads the upload limit", async () => {
+    const calls = stubFetch(200, { maxUploadBytes: 1024 });
+    expect(await getLimits()).toEqual({ maxUploadBytes: 1024 });
+    expect(calls[0]?.url).toBe("/api/admin/limits");
+  });
+
+  test("getImport and listImports", async () => {
+    const calls = stubFetch(200, []);
+    await getImport("i 1");
+    await listImports(10);
+    await listImports();
+    expect(calls.map((c) => c.url)).toEqual([
+      "/api/admin/imports/i%201",
+      "/api/admin/imports?limit=10",
+      "/api/admin/imports",
+    ]);
+  });
+});
+
+class FakeXhr {
+  static last: FakeXhr;
+  static created = 0;
+  method = "";
+  url = "";
+  headers: Record<string, string> = {};
+  body: unknown;
+  status = 0;
+  statusText = "";
+  responseText = "";
+  withCredentials = false;
+  upload = {
+    onprogress: null as
+      | ((e: { lengthComputable: boolean; loaded: number; total: number }) => void)
+      | null,
+  };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  constructor() {
+    FakeXhr.created += 1;
+    FakeXhr.last = this;
+  }
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+  send(body: unknown) {
+    this.body = body;
+  }
+  abort() {
+    this.onabort?.();
+  }
+  respond(status: number, body: unknown) {
+    this.status = status;
+    this.responseText = typeof body === "string" ? body : JSON.stringify(body);
+    this.onload?.();
+  }
+}
+
+describe("uploadFile", () => {
+  const file = () => new File([new Uint8Array([1])], "song.flac");
+
+  test("posts the file with the CSRF header and reports progress", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const progress: number[] = [];
+    const pending = uploadFile(file(), (ratio) => progress.push(ratio));
+    const xhr = FakeXhr.last;
+    expect(xhr.method).toBe("POST");
+    expect(xhr.url).toBe("/api/admin/imports");
+    expect(xhr.headers["X-Requested-With"]).toBe("player");
+    expect(((xhr.body as FormData).get("file") as File).name).toBe("song.flac");
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+    xhr.respond(202, { importId: "imp" });
+    expect(await pending).toEqual({ importId: "imp" });
+    expect(progress).toEqual([0.5, 1]);
+  });
+
+  test("rejects with an ApiError from the error envelope", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const pending = uploadFile(file(), () => {});
+    FakeXhr.last.respond(413, { error: { code: "too_large", message: "Too big" } });
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(413);
+    expect((error as ApiError).code).toBe("too_large");
+  });
+
+  test("a network failure rejects with an ApiError", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const pending = uploadFile(file(), () => {});
+    FakeXhr.last.onerror?.();
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("network_error");
+  });
+
+  test("aborting the signal aborts the request", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const controller = new AbortController();
+    const pending = uploadFile(file(), () => {}, { signal: controller.signal });
+    controller.abort();
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("aborted");
+  });
+
+  test("an already aborted signal never sends", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const controller = new AbortController();
+    controller.abort();
+    const before = FakeXhr.created;
+    const pending = uploadFile(file(), () => {}, { signal: controller.signal });
+    const error = await pending.catch((e: unknown) => e);
+    expect((error as ApiError).code).toBe("aborted");
+    expect(FakeXhr.created).toBe(before);
+  });
+
+  test("the abort listener is removed after the request settles", async () => {
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const signal = {
+      aborted: false,
+      addEventListener: (_type: string, listener: unknown) => added.push(listener),
+      removeEventListener: (_type: string, listener: unknown) => removed.push(listener),
+    } as unknown as AbortSignal;
+    const pending = uploadFile(file(), () => {}, { signal });
+    FakeXhr.last.respond(202, { importId: "imp" });
+    await pending;
+    expect(added).toHaveLength(1);
+    expect(removed).toEqual(added);
+  });
+});
+
+describe("metadata calls", () => {
+  const track = { id: "t", title: "T" };
+
+  test("searchMetadata encodes q and passes the signal", async () => {
+    const calls = stubFetch(200, { proposals: [], partial: true });
+    const controller = new AbortController();
+    expect(await searchMetadata("AC/DC & co", { signal: controller.signal })).toEqual({
+      proposals: [],
+      partial: true,
+    });
+    expect(calls[0]!.url).toBe("/api/admin/metadata/search?q=AC%2FDC%20%26%20co");
+    expect(calls[0]!.init.signal).toBe(controller.signal);
+  });
+
+  test("applyMetadata posts the proposal id and the cover choice", async () => {
+    const result = { track, tagsWritten: true, coverApplied: true };
+    const calls = stubFetch(200, result);
+    expect(await applyMetadata("a b", "p1", true)).toEqual(result as never);
+    expect(calls[0]!.url).toBe("/api/admin/tracks/a%20b/metadata");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ proposalId: "p1", applyCover: true });
+  });
+
+  test("applyMetadata turns 422 cover_rejected into a result with coverError", async () => {
+    stubFetch(422, {
+      error: { code: "cover_rejected", message: "refused" },
+      track,
+      tagsWritten: false,
+      coverApplied: false,
+      coverError: "cover_rejected",
+    });
+    expect(await applyMetadata("t", "p1", true)).toEqual({
+      track,
+      tagsWritten: false,
+      coverApplied: false,
+      coverError: "cover_rejected",
+    } as never);
+  });
+
+  test("applyMetadata rethrows other errors, proposal_expired included", async () => {
+    stubFetch(404, { error: { code: "proposal_expired", message: "expired" } });
+    const error = await applyMetadata("t", "p1", false).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("proposal_expired");
+  });
+});

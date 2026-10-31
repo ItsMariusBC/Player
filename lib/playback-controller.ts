@@ -42,7 +42,11 @@ export function createPlaybackController(music: MusicManager): PlaybackControlle
     next: () => queueManager.next(),
     previous: () => queueManager.previous(),
     playSong(target) {
-      const index = typeof target === "number" ? target : target.id;
+      const index =
+        typeof target === "number"
+          ? target
+          : queueManager.songs.findIndex((song) => song.id === target.id);
+      if (index === -1) return;
       const wasPaused = music.isPaused();
       queueManager.setIndex(index);
       if (wasPaused) void music.play();

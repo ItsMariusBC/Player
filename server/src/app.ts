@@ -3,16 +3,30 @@ import type { MiddlewareHandler } from "hono";
 import type { DatabaseSync } from "node:sqlite";
 import { requireRequestedWith, requireSession, type AuthEnv } from "./auth/middleware.ts";
 import type { OidcAdapter } from "./auth/oidc.ts";
+import type { ImportQueue } from "./admin/imports.ts";
+import { adminFolderRoutes } from "./routes/admin-folders.ts";
+import { adminImportRoutes, adminLimitsRoutes } from "./routes/admin-imports.ts";
+import { createTrackLocks } from "./admin/track-edit.ts";
+import type { MetadataSearch } from "./metadata/search.ts";
+import { addMetadataApplyRoute, adminMetadataRoutes } from "./routes/admin-metadata.ts";
+import { adminTrackRoutes } from "./routes/admin-tracks.ts";
 import { mountDevBypass } from "./dev-bypass.ts";
 import type { AppConfig } from "./config.ts";
 import { jsonError } from "./http.ts";
+import type { MediaStorage } from "./media/storage.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { catalogRoutes } from "./routes/catalog.ts";
+import { mediaRoutes } from "./routes/media.ts";
 import { mountStatic } from "./static.ts";
 
 export interface AppDeps {
   config: AppConfig;
   db: DatabaseSync;
   oidc: OidcAdapter;
+  storage: MediaStorage;
+  imports: ImportQueue;
+  /** Metadata lookup; its routes are not mounted when omitted. */
+  metadata?: MetadataSearch;
   now?: () => Date;
   staticDir?: string;
   log?: (event: string, data?: Record<string, unknown>) => void;
@@ -30,7 +44,10 @@ export function createApp(deps: AppDeps) {
     c.header("X-Content-Type-Options", "nosniff");
     c.header("X-Frame-Options", "DENY");
     c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-    if (c.req.path.startsWith("/api/")) c.header("Cache-Control", "no-store");
+    // Routes may set their own policy (for example private covers).
+    if (c.req.path.startsWith("/api/") && !c.res.headers.has("Cache-Control")) {
+      c.header("Cache-Control", "no-store");
+    }
   });
 
   app.onError((err, c) => {
@@ -57,6 +74,21 @@ export function createApp(deps: AppDeps) {
       expiresAt: c.get("session").expiresAt.toISOString(),
     });
   });
+
+  app.route("/api/catalog", catalogRoutes(deps, session));
+  app.route("/api/media", mediaRoutes(deps, session));
+
+  app.route("/api/admin/imports", adminImportRoutes({ ...deps, now }, session));
+  app.route("/api/admin/limits", adminLimitsRoutes(deps, session));
+  app.route("/api/admin/folders", adminFolderRoutes({ ...deps, now }, session));
+  // One lock for every route that touches a track's files (PATCH, DELETE, cover, metadata).
+  const trackLocks = createTrackLocks();
+  const trackRoutes = adminTrackRoutes({ ...deps, now, trackLocks }, session);
+  if (deps.metadata) {
+    addMetadataApplyRoute(trackRoutes, { ...deps, metadata: deps.metadata, now, trackLocks });
+    app.route("/api/admin/metadata", adminMetadataRoutes({ metadata: deps.metadata }, session));
+  }
+  app.route("/api/admin/tracks", trackRoutes);
 
   deps.mount?.(app, session);
 

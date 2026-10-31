@@ -87,3 +87,22 @@ describe("loadConfig", () => {
     assert.equal(config.devBypass, true);
   });
 });
+
+describe("loadConfig MAX_UPLOAD_MB", () => {
+  it("defaults to 200 MB", () => {
+    assert.equal(loadConfig(minimal).maxUploadBytes, 200 * 1024 * 1024);
+  });
+
+  it("reads MAX_UPLOAD_MB", () => {
+    assert.equal(loadConfig({ ...minimal, MAX_UPLOAD_MB: "5" }).maxUploadBytes, 5 * 1024 * 1024);
+  });
+
+  it("rejects invalid values", () => {
+    for (const bad of ["0", "-1", "1.5", "abc"]) {
+      assert.throws(
+        () => loadConfig({ ...minimal, MAX_UPLOAD_MB: bad }),
+        (error) => error instanceof ConfigError && error.message.includes("MAX_UPLOAD_MB"),
+      );
+    }
+  });
+});

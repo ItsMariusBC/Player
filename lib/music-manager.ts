@@ -1,7 +1,7 @@
 // lib/music-manager.ts
 // Audio engine: owns the <audio> element, the AudioContext and the queue.
 // It emits PlayerEvents; it never knows about the UI.
-import { Song } from "@/music/data";
+import type { Song } from "@/lib/catalog";
 import {
   createQueueManager,
   getTrackDirection,
@@ -9,7 +9,6 @@ import {
   QueueManager,
   TrackDirection,
 } from "@/lib/queue-manager";
-import { createStorageManager, StorageManager } from "@/lib/storage-manager";
 import { createEmitter, Listener } from "@/lib/events";
 
 export type PlayerEvent =
@@ -22,7 +21,6 @@ export type PlayerEvent =
 export type PlayerEventListener = Listener<PlayerEvent>;
 
 export interface MusicManager {
-  readonly storageManager: StorageManager;
   readonly queueManager: QueueManager;
   readonly analyser: AnalyserNode;
 
@@ -32,6 +30,8 @@ export interface MusicManager {
   play(): Promise<void>;
   pause(): void;
   setPlaying(song: Song): void;
+  /** Stops and detaches the media, e.g. when the queue becomes empty. */
+  clearSource(): void;
   destroy(): void;
 
   isPaused(): boolean;
@@ -84,8 +84,8 @@ export function createMusicManager(): MusicManager {
     }
   };
 
-  const storageManager = createStorageManager();
   let lastIndex = -1;
+  let lastSongId: string | undefined;
   // True between a play() request and the "play" event, so a track change
   // while playing never reads as paused during the source swap.
   let pendingPlay = false;
@@ -93,8 +93,9 @@ export function createMusicManager(): MusicManager {
   const queueManager = createQueueManager({
     onUpdate: (song) => {
       if (song) manager.setPlaying(song);
+      else manager.clearSource();
       const nextIndex = queueManager.currentIndex;
-      if (song && lastIndex !== -1 && nextIndex !== lastIndex) {
+      if (song && lastSongId !== undefined && song.id !== lastSongId) {
         events.emit({
           type: "track",
           song,
@@ -102,9 +103,14 @@ export function createMusicManager(): MusicManager {
         });
       }
       lastIndex = nextIndex;
+      lastSongId = song?.id;
       events.emit({ type: "time", currentTime: 0, duration: 0 });
     },
-    onSongListUpdated: (songs) => events.emit({ type: "queue", songs }),
+    onSongListUpdated: (songs) => {
+      // A refresh may move the current track without changing it.
+      lastIndex = queueManager.currentIndex;
+      events.emit({ type: "queue", songs });
+    },
   });
 
   const onPlay = () => {
@@ -125,7 +131,6 @@ export function createMusicManager(): MusicManager {
 
   const manager: MusicManager = {
     queueManager,
-    storageManager,
     get analyser() {
       return analyser || tempAnalyser;
     },
@@ -179,6 +184,11 @@ export function createMusicManager(): MusicManager {
       audio.load();
       if (wasPlaying) void this.play();
     },
+    clearSource() {
+      this.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    },
     destroy() {
       this.pause();
       audio.removeEventListener("play", onPlay);
@@ -195,7 +205,7 @@ export function createMusicManager(): MusicManager {
   audio.addEventListener("play", onPlay);
   audio.addEventListener("pause", onPause);
   audio.addEventListener("ended", onEnded);
-  queueManager.setSongs(storageManager.loadSongs());
+  // The queue starts empty: the player feeds it with the catalogue (setSongs).
 
   return manager;
 }

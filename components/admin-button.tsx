@@ -6,6 +6,7 @@ export function AdminButton({ onOpen }: { onOpen: () => void }) {
       <button
         type="button"
         aria-label="Administration"
+        data-admin-button=""
         onClick={onOpen}
         className="pointer-events-auto flex items-center gap-2 rounded-md text-sm text-purple-200/70 drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-colors hover:text-purple-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60"
       >

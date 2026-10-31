@@ -3,11 +3,15 @@ import { createNotificationManager, Notification } from "../../lib/notification-
 import type { PlayerEvent, PlayerEventListener } from "../../lib/music-manager";
 import type { QueueItem } from "../../lib/queue-manager";
 
-const song = (id: number): QueueItem => ({
-  id,
-  name: `Song ${id}`,
+const song = (n: number): QueueItem => ({
+  id: `song-${n}`,
+  name: `Song ${n}`,
   author: "A",
-  url: `/${id}.mp3`,
+  album: "",
+  url: `/api/media/song-${n}`,
+  folderId: null,
+  folderPath: [],
+  updatedAt: "2026-10-27T00:00:00.000Z",
 });
 
 function setup() {
@@ -78,7 +82,7 @@ describe("notification manager", () => {
     advance(100);
     emit({ type: "track", song: song(3), direction: "next" });
     advance(300);
-    expect(seen.map((n) => n && n.song.id)).toEqual([3]);
+    expect(seen.map((n) => n && n.song.id)).toEqual(["song-3"]);
   });
 
   test("a new notification replaces the current one instead of stacking", () => {

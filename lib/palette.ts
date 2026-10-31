@@ -1,7 +1,6 @@
 // lib/palette.ts
-// Derives the background gradient of a song from its cover art, unless the
-// song declares an explicit `gradient` in the catalogue.
-import { Song } from "@/music/data";
+// Derives the background gradient of a song from its cover art.
+import type { Song } from "@/lib/catalog";
 
 export type GradientColors = [string, string, string];
 
@@ -12,7 +11,6 @@ const cache = new Map<string, Promise<GradientColors>>();
 
 export function getSongGradient(song: Song | undefined): Promise<GradientColors> {
   if (!song) return Promise.resolve(DEFAULT_GRADIENT);
-  if (song.gradient) return Promise.resolve(song.gradient);
   if (!song.picture) return Promise.resolve(DEFAULT_GRADIENT);
 
   let pending = cache.get(song.picture);
@@ -97,8 +95,8 @@ export function relativeLuminance({ h, s, l }: Hsl): number {
 
 function samplePixels(src: string): Promise<Uint8ClampedArray> {
   return new Promise((resolve, reject) => {
+    // Covers are same-origin (session cookie): no CORS mode, the canvas stays readable.
     const image = new Image();
-    image.crossOrigin = "anonymous";
     image.onload = () => {
       const canvas = document.createElement("canvas");
       canvas.width = SAMPLE_SIZE;

@@ -18,6 +18,25 @@ export interface SessionInfo {
   expiresAt: string;
 }
 
+/**
+ * Builds the ApiError of a failed response from its status and raw body, reading the
+ * `{ error: { code, message } }` envelope when there is one. Shared with the XHR upload.
+ */
+export function toApiError(status: number, statusText: string, bodyText: string): ApiError {
+  let code = status === 401 ? "session_required" : "request_failed";
+  let message = statusText || "Request failed";
+  let details: unknown;
+  try {
+    const body = JSON.parse(bodyText) as { error?: { code?: string; message?: string } };
+    details = body;
+    if (body.error?.code) code = body.error.code;
+    if (body.error?.message) message = body.error.message;
+  } catch {
+    // Non-JSON error body: keep the defaults.
+  }
+  return new ApiError(status, code, message, details);
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("X-Requested-With", "player");
@@ -26,19 +45,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
 
   if (!response.ok) {
-    let code = response.status === 401 ? "session_required" : "request_failed";
-    let message = response.statusText || "Request failed";
-    let details: unknown;
-    try {
-      const body = (await response.json()) as { error?: { code?: string; message?: string } };
-      details = body;
-      if (body.error?.code) code = body.error.code;
-      if (body.error?.message) message = body.error.message;
-    } catch {
-      // Non-JSON error body: keep the defaults.
-    }
-    throw new ApiError(response.status, code, message, details);
+    const text = await response.text().catch(() => "");
+    throw toApiError(response.status, response.statusText, text);
   }
+
+  // Deletions answer 204 without a body.
+  if (response.status === 204) return undefined as T;
 
   try {
     return (await response.json()) as T;

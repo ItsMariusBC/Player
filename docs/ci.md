@@ -6,14 +6,14 @@ La structure reprend [celle du site Clyse](https://github.com/Clyse-Devs/clyse.d
 
 Chaque push sur `developpment` ou `production`, tag `v*`, PR vers ces branches, lancement manuel et contrôle hebdomadaire exécute toute la pipeline. Les PR obsolètes sont annulées. Les exécutions de branche restent actives.
 
-| Étape       | Contrôles                                                                                                                                                                                                                                                                  |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript (front et `server/`), actionlint, ShellCheck (`scripts/ci`, `scripts/e2e`)                                                                                                                                      |
-| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                                                                                                                                                    |
-| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                                                                                                                                                            |
-| Test        | Tests Bun, tests Node du serveur (`yarn test:server`), Playwright sur le `dist/` récupéré (`PLAYER_SKIP_BUILD=1`) derrière le mock OIDC : montage, lecture partielle des médias, connexion et déconnexion                                                                  |
-| Deploy      | Hadolint, mock OIDC sur l'hôte, Compose avec `docker-compose.ci.yml` (variables OIDC de développement), image, healthcheck, puis `stack-check.sh` : `/healthz`, HTML, `/api/session` 401, `/api/auth/login` 302 vers le mock, 404, Range, uid 101, `/app` en lecture seule |
-| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                                                                                                                                                           |
+| Étape       | Contrôles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript (front et `server/`), actionlint, ShellCheck (`scripts/ci`, `scripts/e2e`)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Test        | Tests Bun, tests Node du serveur (`yarn test:server`), Playwright sur le `dist/` récupéré (`PLAYER_SKIP_BUILD=1`) derrière le mock OIDC : montage, lecture partielle des médias authentifiée, connexion et déconnexion, parcours du panneau d'administration (`tests/e2e/admin.spec.ts` : import d'un WAV généré dans le test et rangement dans un nouveau dossier, renommage, suppression, accès refusé à un membre `users`). Le catalogue e2e vient de `tests/e2e/fixtures/` (deux WAV d'une seconde et un manifeste), importé par `scripts/e2e/start-server.sh` avant le démarrage du serveur |
+| Deploy      | Hadolint, mock OIDC sur l'hôte, Compose avec `docker-compose.ci.yml` (variables OIDC de développement), image, healthcheck, puis `stack-check.sh` : `/healthz`, HTML, `/api/session` 401, `/api/auth/login` 302 vers le mock, 404 (dont `/Drops.mp3`, médias non publics), `/api/catalog` 401 sans session, uid 101, `/app` en lecture seule                                                                                                                                                                                                                                                     |
+| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 Lint et scans démarrent ensemble. Build et validation Docker attendent le lint ; les tests attendent le build. Les rapports JUnit, traces Playwright et SBOM sont gardés 14 jours. Les sorties sont privées, rattachées au run GitHub.
 
@@ -63,6 +63,8 @@ Un fichier `.env` est obligatoire à côté de `docker-compose.yml` (modèle : `
 - Obligatoires : `APP_URL` (origine publique, en HTTPS), `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (64 caractères hexadécimaux, `openssl rand -hex 32`).
 - Facultatives : `PORT`, `DATA_DIR`, `OIDC_GROUPS_CLAIM`, `OIDC_GROUP_ADMIN`, `OIDC_GROUP_USERS`, `SESSION_TTL_HOURS`, `MAX_UPLOAD_MB`, `TRUST_PROXY`, `NODE_ENV`.
 
+`MAX_UPLOAD_MB` (défaut 200) plafonne la taille d'un fichier importé depuis le panneau ; au-delà, l'API répond 413 `too_large` et le panneau refuse le fichier avant l'envoi (`GET /api/admin/limits`). Les pochettes déposées à la main sont limitées à 5 Mio, indépendamment de cette variable. Pour un reverse proxy, prévoir une limite de corps au moins égale.
+
 Sans variable obligatoire, le conteneur journalise `Configuration error: ...` et s'arrête. Si l'émetteur OIDC est momentanément injoignable, le démarrage réessaie pendant un peu plus d'une minute (événement `oidc.discovery_retry`) avant d'abandonner (63 s d'attente cumulée, d'où un `start_period` de 70 s pour le healthcheck).
 
 `PLAYER_DATA_PATH` choisit le stockage de `/data` : un chemin de l'hôte (bind, propriétaire uid 101) ou un nom de volume. Par défaut, le volume nommé `player-data`.
@@ -91,6 +93,44 @@ Le job `deploy:stack` valide un environnement Docker éphémère. L'instance ré
 4. Déployer uniquement un commit dont `CI required` a réussi. L'autodeploy natif sur push est à laisser désactivé tant qu'un déclenchement après réussite de la CI n'est pas connecté ; il pourrait démarrer avant les contrôles.
 
 Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/auto-deploy) pour le déclenchement par API après CI.
+
+### Migration du catalogue
+
+Le script importe un dossier de fichiers audio existant (récursif) dans le catalogue, sans jamais modifier ni supprimer les fichiers sources. Les sous-dossiers deviennent des dossiers du catalogue ; le manifeste (JSON : `name`, `author`, `url`, `folder`, pochette) fournit titre, artiste, dossier et pochette. Sauvegarder d'abord le volume `/data`. Les sources et le manifeste sont montés en lecture seule :
+
+```
+docker compose run --rm -v <dossier-de-musique>:/import:ro -v <manifeste.json>:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
+```
+
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué.
+
+Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
+
+### Sortie réseau (recherche de métadonnées)
+
+La recherche de métadonnées du panneau appelle des services publics en HTTPS (port 443). Le serveur doit pouvoir joindre :
+
+- `musicbrainz.org` et `coverartarchive.org`, qui redirige vers `archive.org` et ses sous-domaines (`*.archive.org`) ;
+- `api.deezer.com`, et `cdn-images.dzcdn.net` / `e-cdns-images.dzcdn.net` pour les pochettes ;
+- `itunes.apple.com`, et `is1-ssl.mzstatic.com` à `is5-ssl.mzstatic.com` pour les pochettes.
+
+Tout autre domaine est refusé pour les pochettes, quelle que soit la réponse d'un fournisseur. Sans cette sortie, `GET /api/admin/metadata/search` répond `partial: true` (certains fournisseurs seulement) ou 502 `provider_error` (aucun), et appliquer une pochette échoue en `cover_rejected` : le reste de l'application (lecture, import, édition manuelle) n'est pas affecté. Les pare-feu sortants peuvent donc rester fermés si la recherche n'est pas utilisée.
+
+### Sauvegarde
+
+Tout l'état est dans le volume `/data` (`PLAYER_DATA_PATH`) : base SQLite (catalogue, sessions, audit `admin_events`), `media/` et `incoming/`. Le sauvegarder en entier, arrêt du conteneur ou instantané de volume cohérent, avant une migration, une montée de version ou un import massif. Restaurer le volume avec l'image correspondante (voir Promotion et retour arrière).
+
+### Recette du panneau d'administration
+
+Après un déploiement, avec Authentik réel :
+
+1. Se connecter avec un compte du groupe `admin` : le bouton d'administration apparaît à côté de la déconnexion et ouvre le panneau.
+2. Importer un fichier FLAC, MP3 ou WAV (zone de dépôt, clic ou glisser-déposer) : l'import passe de `processing` à `ready` et le titre apparaît dans la liste et dans le lecteur après rafraîchissement du catalogue (60 s au plus).
+3. Déposer le même fichier : l'import échoue avec la raison `duplicate`.
+4. Modifier titre, artiste, album, dossier, pochette ; vérifier la lecture et la pochette mises à jour.
+5. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
+6. Supprimer le titre de test et le dossier de test.
+7. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
 
 ## Promotion et retour arrière
 

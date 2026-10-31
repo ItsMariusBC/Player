@@ -6,7 +6,8 @@ const appOrigin = new URL(process.env.PLAYER_TEST_URL || "http://127.0.0.1:4173"
 
 export async function loginAs(page: Page, account: Account): Promise<void> {
   await page.goto("/");
-  await page.waitForURL(/\/interaction\//);
+  // toHaveURL polls: waitForURL throws ERR_ABORTED when the redirect chain aborts a navigation.
+  await expect(page).toHaveURL(/\/interaction\//);
   await page.locator("input[name=login]").fill(account);
   await page.locator("input[name=password]").fill("password");
   await page.locator("button[type=submit]").click();

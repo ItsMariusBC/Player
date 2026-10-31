@@ -241,16 +241,21 @@ describe("POST /api/admin/imports/url", () => {
     for (const n of [1, 2, 3]) {
       assert.equal((await post(cookie, { url: `https://example.com/${n}.wav` })).status, 202);
     }
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
-    await settle();
+    const until = async (condition: () => boolean, timeoutMs: number) => {
+      const deadline = Date.now() + timeoutMs;
+      while (!condition()) {
+        if (Date.now() > deadline) throw new Error("timed out waiting for the condition");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    await until(() => started === 2, 2000);
+    // Give a (wrongly started) third download time to show up before asserting it did not.
+    await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(started, 2);
     assert.equal(peak, 2);
     gates.shift()!();
-    await settle();
-    assert.equal(started, 3);
+    await until(() => started === 3, 2000);
     assert.equal(peak, 2);
-    while (gates.length) gates.shift()!();
-    await settle();
     while (gates.length) gates.shift()!();
     await t.imports.idle();
     assert.equal(peak, 2);

@@ -25,6 +25,8 @@ export interface TrackDto {
   loudnessLufs: number | null;
   /** True peak in dBTP; null while unmeasured. */
   truePeakDbtp: number | null;
+  /** True when a lightweight (AAC) variant is available for ?q=light. */
+  hasLight: boolean;
   /** ISO timestamp; bumped by every edit, including a cover change (cache busting with ?v=). */
   updatedAt: string;
 }
@@ -54,7 +56,9 @@ export interface Song {
   gainDb: number;
 }
 
-export const mediaUrl = (id: string) => `/api/media/${encodeURIComponent(id)}`;
+/** Media URL; ?q=light asks for the lightweight variant (the server falls back when it has none). */
+export const mediaUrl = (id: string, quality?: "max" | "light") =>
+  `/api/media/${encodeURIComponent(id)}` + (quality === "light" ? "?q=light" : "");
 /** With updatedAt, the URL changes after each edit, so a replaced cover is fetched again. */
 export const coverUrl = (id: string, updatedAt?: string) =>
   `/api/media/${encodeURIComponent(id)}/cover` +

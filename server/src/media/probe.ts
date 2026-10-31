@@ -45,7 +45,7 @@ export function sniffFormat(head: Buffer): AudioFormat | null {
   return null;
 }
 
-async function readHead(path: string): Promise<Buffer> {
+export async function readHead(path: string): Promise<Buffer> {
   const handle = await open(path, "r");
   try {
     const buffer = Buffer.alloc(12);

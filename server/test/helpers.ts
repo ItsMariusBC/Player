@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createImportQueue } from "../src/admin/imports.ts";
+import { createTrackLocks } from "../src/admin/track-edit.ts";
 import { createHealth, type StatfsFn } from "../src/health.ts";
 import { createMaintenance } from "../src/admin/maintenance.ts";
 import { createApp, type AppDeps } from "../src/app.ts";
@@ -24,6 +25,9 @@ export interface TestAppOptions {
   mount?: AppDeps["mount"];
   /** Loudness measurement used by imports and the backfill; ffmpeg never runs in tests. */
   measure?: (file: string) => Promise<Loudness | null>;
+  /** WAV to FLAC conversion and AAC encoding; both fail by default, so originals stay as imported. */
+  convertWav?: (src: string, dest: string) => Promise<boolean>;
+  encodeAac?: (src: string, dest: string) => Promise<boolean>;
   /** Whether ffmpeg counts as available (default true). */
   ffmpegAvailable?: boolean | (() => Promise<boolean>);
   /** Disk stats used by the health check; defaults to plenty of free space. */
@@ -93,12 +97,16 @@ export function createTestApp(opts: TestAppOptions = {}) {
 
   const log: LogEntry[] = [];
   const logger = (event: string, data?: Record<string, unknown>) => log.push({ event, data });
+  const trackLocks = createTrackLocks();
   const imports = createImportQueue({
     db,
     storage,
+    trackLocks,
     log: logger,
     now: clock,
     measure: opts.measure ?? (async () => null),
+    convertWav: opts.convertWav ?? (async () => false),
+    encodeAac: opts.encodeAac ?? (async () => false),
     ffmpegAvailable:
       typeof opts.ffmpegAvailable === "function"
         ? opts.ffmpegAvailable
@@ -160,6 +168,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    trackLocks,
     maintenance,
     health,
     now: clock,
@@ -206,6 +215,7 @@ export function createTestApp(opts: TestAppOptions = {}) {
     oidc,
     storage,
     imports,
+    trackLocks,
     maintenance,
     tempDir,
     cleanup,

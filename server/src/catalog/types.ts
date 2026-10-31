@@ -22,6 +22,10 @@ export interface TrackRecord {
   truePeakDbtp: number | null;
   /** Last measurement attempt (success or not); null = never tried. Not exposed in the DTO. */
   loudnessMeasuredAt: Date | null;
+  /** Size of the light AAC variant (stream.m4a); null when there is none. */
+  aacSizeBytes: number | null;
+  /** Last variant attempt (success or not); null = never tried. Not exposed in the DTO. */
+  aacAttemptedAt: Date | null;
   position: number;
   createdAt: Date;
   updatedAt: Date;
@@ -77,6 +81,8 @@ export interface TrackDto {
   durationMs: number | null;
   format: "flac" | "mp3" | "wav";
   hasCover: boolean;
+  /** A light (AAC) variant exists. */
+  hasLight: boolean;
   /** Null when not measured; the client then plays the track at 0 dB. */
   loudnessLufs: number | null;
   truePeakDbtp: number | null;

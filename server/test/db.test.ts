@@ -6,8 +6,19 @@ import { MIGRATIONS, migrate } from "../src/migrations.ts";
 describe("database", () => {
   it("applies migrations once and is idempotent", () => {
     const db = openDatabase(":memory:");
-    assert.equal(migrate(db), 7);
+    assert.equal(migrate(db), 8);
     assert.equal(migrate(db), 0);
+    db.close();
+  });
+
+  it("adds the light variant columns in migration 8", () => {
+    const db = openDatabase(":memory:");
+    migrate(db);
+    const columns = (db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    assert.ok(columns.includes("aac_size_bytes"));
+    assert.ok(columns.includes("aac_attempted_at"));
     db.close();
   });
 
@@ -175,7 +186,7 @@ describe("migration 7: song request lifecycle", () => {
     );
     insert.run("r1", "One", "pending");
     insert.run("r2", "Two", "accepted");
-    assert.equal(migrate(db), 1);
+    assert.equal(migrate(db), 2);
     const rows = db.prepare("SELECT * FROM song_requests ORDER BY id").all() as any[];
     assert.equal(rows.length, 2);
     assert.deepEqual(

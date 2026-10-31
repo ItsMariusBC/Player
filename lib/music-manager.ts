@@ -2,7 +2,7 @@
 // Audio engine: owns two <audio> elements (current + standby for the next track),
 // the AudioContext and the queue.
 // It emits PlayerEvents; it never knows about the UI.
-import type { Song } from "@/lib/catalog";
+import { mediaUrl, type Song } from "@/lib/catalog";
 import {
   createQueueManager,
   getTrackDirection,
@@ -44,6 +44,9 @@ export interface MusicManager {
 
   getVolume(): number;
   setVolume(v: number): void;
+
+  /** Quality of the files loaded from now on; the current track keeps playing as is. */
+  setQuality(quality: "max" | "light"): void;
 }
 
 type AudioContextCtor = typeof AudioContext;
@@ -70,6 +73,8 @@ export function createMusicManager(): MusicManager {
   // setTime before metadata: applied on loadedmetadata of `current`.
   let pendingSeek: number | null = null;
   let volume = 1;
+  let quality: "max" | "light" = "max";
+  const urlOf = (song: Song) => mediaUrl(song.id, quality);
 
   // The real context is created lazily on the first user gesture (autoplay policy).
   let context: AudioContext | null = null;
@@ -153,11 +158,12 @@ export function createMusicManager(): MusicManager {
     }
     // Set the gain first: the track may already be in place with a gain that changed since.
     setElementGain(standby, next.gainDb);
-    if (standbyUrl === next.url) return;
-    standby.src = next.url;
+    const url = urlOf(next);
+    if (standbyUrl === url) return;
+    standby.src = url;
     standby.preload = "auto";
     standby.load();
-    standbyUrl = next.url;
+    standbyUrl = url;
   };
 
   const armPreload = () => {
@@ -254,6 +260,16 @@ export function createMusicManager(): MusicManager {
       return !context || context.state === "suspended" || current.paused;
     },
     getVolume: () => volume,
+    setQuality(next) {
+      if (next === quality) return;
+      quality = next;
+      // A track buffered in standby has the old quality: drop it so the preload restarts with the right URL.
+      if (standbyUrl !== null) {
+        emptyElement(standby);
+        standbyUrl = null;
+        if (preloadArmed) preloadNext();
+      }
+    },
     setVolume(v) {
       volume = Math.max(0, Math.min(1, v));
       current.volume = volume;
@@ -312,7 +328,7 @@ export function createMusicManager(): MusicManager {
       pendingSeek = null;
       preloadArmed = false;
       clearPreloadTimer();
-      if (standbyUrl === song.url) {
+      if (standbyUrl === urlOf(song)) {
         // The track is already buffered in standby: swap roles.
         const previous = current;
         current = standby;
@@ -323,7 +339,7 @@ export function createMusicManager(): MusicManager {
         if (current.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) armPreload();
       } else {
         setElementGain(current, song.gainDb);
-        current.src = song.url;
+        current.src = urlOf(song);
         current.load();
       }
       if (wasPlaying) void this.play();

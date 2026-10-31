@@ -15,6 +15,7 @@ export type AdminAction =
   | "request_reject"
   | "request_fulfilled"
   | "loudness_backfill"
+  | "media_optimize"
   | "maintenance_run";
 
 /** One audit row per admin mutation; detail must never carry a secret. */

@@ -15,6 +15,7 @@ import { RequestList } from "@/components/admin/request-list";
 import { MetadataDialog } from "@/components/admin/metadata-dialog";
 import { TrackEditor } from "@/components/admin/track-editor";
 import { LoudnessStatus } from "@/components/admin/loudness-status";
+import { MediaStatus } from "@/components/admin/media-status";
 import { SystemStatus } from "@/components/admin/system-status";
 import { TrackTable } from "@/components/admin/track-table";
 import { UploadZone, hasFiles } from "@/components/admin/upload-zone";
@@ -741,6 +742,9 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
           </div>
           <div className="shrink-0">
             <LoudnessStatus onError={showError} />
+          </div>
+          <div className="shrink-0">
+            <MediaStatus onError={showError} />
           </div>
           <div className="shrink-0">
             <SystemStatus onError={showError} />

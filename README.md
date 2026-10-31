@@ -2,6 +2,8 @@
 
 Lecteur musical React 19, TypeScript, Vite 8 et Tailwind CSS 4. Le projet existant est conservé dans ce dépôt privé.
 
+- Lecture continue : Media Session (touches multimédia, écran de verrouillage), reprise du dernier titre et de sa position au rechargement, pré-chargement du titre suivant.
+
 ## Développement
 
 Prérequis : Node indiqué dans `.node-version`, Yarn 1.22.22 et Bun indiqué dans `.bun-version` pour les tests unitaires.
@@ -21,13 +23,30 @@ yarn playwright install chromium
 yarn test:e2e
 ```
 
-`yarn validate` exécute lint, format des fichiers d’outillage, types, tests unitaires et build. Les tests navigateur utilisent le build `dist/`. `yarn generate:music` régénère le catalogue à partir de `public/` et peut modifier les pochettes.
+`yarn validate` exécute lint, format des fichiers d’outillage, types, tests unitaires et build. Les tests navigateur utilisent le build `dist/`.
+
+Le catalogue vit dans le dossier de données de l'API (`DATA_DIR`) et n'est plus versionné. Pour remplir le dossier de données de développement avec des fichiers audio existants :
+
+```sh
+DATA_DIR=./.data yarn migrate:catalog <dossier-de-musique> [--manifest <fichier.json>]
+```
+
+Les tests navigateur remplissent leur propre catalogue à partir de `tests/e2e/fixtures/`. Les scénarios du panneau d'administration (`tests/e2e/admin.spec.ts`, `tests/e2e/admin-batch.spec.ts`) et des demandes de sons (`tests/e2e/requests.spec.ts`) se connectent avec `admin@test` et `user@test` via le fournisseur factice ; ils tournent avec `yarn test:e2e`.
+
+## Administration
+
+Les membres du groupe `admin` voient un bouton à côté de la déconnexion, qui ouvre le panneau d'administration du catalogue : créer, renommer, déplacer et supprimer des dossiers ; importer des fichiers FLAC, MP3 ou WAV (clic ou glisser-déposer, traités l'un après l'autre côté serveur) ; modifier titre, artiste, album, dossier et pochette ; compléter un titre depuis des bases libres (MusicBrainz, Deezer, iTunes). Le panneau permet aussi d'importer un dossier entier (glisser-déposer ou « Importer un dossier »), d'importer par URL https, et d'éditer ou supprimer plusieurs titres à la fois. Les membres du groupe `users` n'ont que la lecture : `/api/admin/*` leur répond 403.
+
+Tout utilisateur connecté peut proposer un titre au catalogue : bouton « Demander un son » sous la file d'attente (recherche chez les fournisseurs ou saisie libre, suivi dans « Mes demandes »). Les administrateurs les traitent dans l'onglet « Demandes » du panneau d'administration (valider, importer le fichier demandé, refuser avec un motif ou supprimer) ; l'utilisateur voit le résultat dans « Mes demandes » (« Ajoutée », « Écouter », « Refusée : motif ») et un compteur de nouveautés sur le bouton. L'exécution d'une demande ne renseigne que la ligne du catalogue (titre, artiste, album, pochette) et ne réécrit pas les tags du fichier ; une modification ultérieure du titre dans l'éditeur les réécrit.
+
+Les modifications de titre, d'artiste et d'album sont aussi écrites dans les tags du fichier, au mieux : MP3 et FLAC oui, WAV jamais (le catalogue reste la référence). Une panne de l'écriture de tags n'annule pas la modification. La taille maximale d'un import se règle avec `MAX_UPLOAD_MB` (200 par défaut). La recherche de métadonnées demande une sortie HTTPS du serveur vers les fournisseurs ; sans elle, le reste fonctionne. Le volume des titres est normalisé à la lecture (cible -14 LUFS) d'après une mesure ffmpeg faite à l'import ; les titres sans mesure (plus anciens, ou importés par `yarn migrate:catalog`, qui ne mesure pas) se rattrapent depuis l'onglet Catalogue de l'administration : la passe s'arrête seule (le statut cesse d'être relu quand `running` retombe), les titres illisibles ou silencieux sont comptés « sans mesure », `updated_at` reste intact, la tentative est consignée dans la colonne `loudness_measured_at`, et un ffmpeg absent répond 409 `ffmpeg_unavailable` (`FFMPEG_PATH` règle le binaire). Diffusion audio : les médias sont mis en cache (`ETag`, `304`, `If-Range`) et les WAV importés sont convertis en FLAC sans perte ; une variante allégée AAC (`stream.m4a`, `?q=light`) est préparée pour la lecture mobile et choisie par le réglage « Qualité » du lecteur (Auto, Max, Allégée). Après un déploiement, cliquer sur « Préparer les titres restants » dans l'onglet Catalogue (ligne « Lecture allégée ») convertit et encode les titres existants ; sinon la passe démarre d'elle-même après le premier import (ffmpeg requis). Derrière un reverse proxy, laisser passer `Range`, `If-None-Match` et `If-Range` et ne pas mettre en cache les réponses `private`. Un entretien (répertoires orphelins, historique d'imports) tourne au démarrage puis toutes les `MAINTENANCE_INTERVAL_HOURS` heures (24 par défaut, `0` désactive) et se lance à la main depuis l'onglet Catalogue ; elle ne supprime un répertoire orphelin qu'au-delà d'un délai de grâce d'une heure. `yarn migrate:catalog` travaille dans le même `DATA_DIR` : lancez-le avec `MAINTENANCE_INTERVAL_HOURS=0` ou serveur arrêté. `/healthz` (léger : migrations et espace disque) répond 503 si les migrations sont en attente, si l'espace libre passe sous `MIN_FREE_MB` (500 par défaut), si `DATA_DIR` ou la base sont inaccessibles ; `degraded` veut dire « alerter, ne pas redémarrer » (pas de sonde de vivacité dessus), le détail complet est réservé à `GET /api/admin/health`. Détails des routes et des couches dans [docs/architecture.md](docs/architecture.md), exploitation dans [docs/ci.md](docs/ci.md).
 
 ## Branches et livraison
 
 - `developpment` : branche par défaut, intégration du travail courant.
 - `production` : version destinée à la mise en ligne, alimentée par PR depuis `developpment`.
 - Les PR vers ces deux branches doivent passer `CI required`.
+- Un tag `vX.Y.Z` sur `production` publie l'image `ghcr.io/itsmariusbc/player` et la release GitHub (voir [docs/ci.md](docs/ci.md), « Publication de l'image »).
 
 La [documentation CI/CD](docs/ci.md) détaille les contrôles, Docker et le retour arrière.
 

@@ -1,13 +1,8 @@
 // lib/queue-manager.ts
-import { Song } from "@/music/data";
-import songs from "@/music/data.json";
+import type { Song } from "@/lib/catalog";
 
-export interface QueueItem extends Song {
-  /**
-   * Absolute index in the queue
-   */
-  id: number;
-}
+/** A queue entry is a catalogue song; its position is its index in `songs`. */
+export type QueueItem = Song;
 
 export type TrackDirection = "next" | "previous" | "jump";
 
@@ -33,14 +28,20 @@ export interface QueueManagerOptions {
 export interface QueueManager {
   currentIndex: number;
   songs: QueueItem[];
-  
+
   // Callback pour notifier des changements de chanson - nécessaire pour les composants UI
   onUpdate?: (song: QueueItem | undefined) => void;
 
   getPendingSongs(): QueueItem[];
   getCurrentSong(): QueueItem | undefined;
-  setIndex(id: number): void;
-  setSongs(songs: Song[]): void;
+  /** Selects a song by its index in the queue (wraps around). */
+  setIndex(index: number): void;
+  /**
+   * Replaces the queue, e.g. when the catalogue is (re)loaded. `startIndex` only
+   * applies when there is no current track yet (first load, e.g. a resume): the
+   * queue then starts there, with a single onUpdate and no track change.
+   */
+  setSongs(songs: Song[], startIndex?: number): void;
 
   previous(): void;
   next(): void;
@@ -52,15 +53,29 @@ export function createQueueManager(options: QueueManagerOptions): QueueManager {
     songs: [],
     // Pour permettre aux composants UI de s'abonner directement
     onUpdate: options.onUpdate,
-    setSongs(songs: Song[]) {
-      this.songs = songs.map((song, i) => ({ ...song, id: i }));
+    setSongs(songs: Song[], startIndex = 0) {
+      // Refresh policy: the current track is kept by id (its index may move).
+      // If it left the catalogue, the queue clamps to the same index, so the
+      // track now at that position takes over (the removed media is no longer
+      // served anyway). onUpdate only fires when the current track changes, so
+      // a periodic refresh never restarts what is playing.
+      const previous = this.getCurrentSong();
+      this.songs = songs;
 
-      // Ensure index is in the songs list
-      this.setIndex(this.currentIndex === -1 ? 0 : this.currentIndex);
+      let target: number;
+      if (songs.length === 0) target = -1;
+      else if (!previous) target = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
+      else {
+        const found = songs.findIndex((song) => song.id === previous.id);
+        target = found !== -1 ? found : Math.min(this.currentIndex, songs.length - 1);
+      }
+      this.currentIndex = target;
 
-      // fire update
-      if (this.onUpdate) this.onUpdate(this.getCurrentSong());
-      if (options.onSongListUpdated) options.onSongListUpdated(this.songs);
+      const current = this.getCurrentSong();
+      if (current?.id !== previous?.id || current?.url !== previous?.url) {
+        this.onUpdate?.(current);
+      }
+      options.onSongListUpdated?.(this.songs);
     },
     getPendingSongs() {
       return this.songs.slice(this.currentIndex + 1);
@@ -68,17 +83,17 @@ export function createQueueManager(options: QueueManagerOptions): QueueManager {
     getCurrentSong() {
       return this.songs[this.currentIndex];
     },
-    setIndex(id) {
+    setIndex(index) {
       let target: number;
 
       if (this.songs.length === 0) target = -1;
-      else if (id >= this.songs.length) target = 0;
-      else if (id < 0) target = songs.length - 1;
-      else target = id;
+      else if (index >= this.songs.length) target = 0;
+      else if (index < 0) target = this.songs.length - 1;
+      else target = index;
 
       if (this.currentIndex === target) return;
       this.currentIndex = target;
-      if (this.onUpdate) this.onUpdate(this.getCurrentSong());
+      this.onUpdate?.(this.getCurrentSong());
     },
     next() {
       this.setIndex(this.currentIndex + 1);

@@ -6,14 +6,14 @@ La structure reprend [celle du site Clyse](https://github.com/Clyse-Devs/clyse.d
 
 Chaque push sur `developpment` ou `production`, tag `v*`, PR vers ces branches, lancement manuel et contrôle hebdomadaire exécute toute la pipeline. Les PR obsolètes sont annulées. Les exécutions de branche restent actives.
 
-| Étape       | Contrôles                                                                                                                                                                                                                                                                  |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript (front et `server/`), actionlint, ShellCheck (`scripts/ci`, `scripts/e2e`)                                                                                                                                      |
-| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                                                                                                                                                    |
-| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                                                                                                                                                            |
-| Test        | Tests Bun, tests Node du serveur (`yarn test:server`), Playwright sur le `dist/` récupéré (`PLAYER_SKIP_BUILD=1`) derrière le mock OIDC : montage, lecture partielle des médias, connexion et déconnexion                                                                  |
-| Deploy      | Hadolint, mock OIDC sur l'hôte, Compose avec `docker-compose.ci.yml` (variables OIDC de développement), image, healthcheck, puis `stack-check.sh` : `/healthz`, HTML, `/api/session` 401, `/api/auth/login` 302 vers le mock, 404, Range, uid 101, `/app` en lecture seule |
-| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                                                                                                                                                           |
+| Étape       | Contrôles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lint        | Oxlint sur tout le code, format de l’outillage, TypeScript (front et `server/`), actionlint, ShellCheck (`scripts/ci`, `scripts/e2e`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Scan        | Trivy vulnérabilités HIGH/CRITICAL et licences, Gitleaks fichiers et historique complet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Build       | Build Vite et artefact `dist/` conservé 7 jours                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Test        | Tests Bun, tests Node du serveur (`yarn test:server`), Playwright sur le `dist/` récupéré (`PLAYER_SKIP_BUILD=1`) derrière le mock OIDC : montage, lecture partielle des médias authentifiée, connexion et déconnexion, parcours du panneau d'administration (`tests/e2e/admin.spec.ts` : import d'un WAV généré dans le test et rangement dans un nouveau dossier, renommage, suppression, accès refusé à un membre `users` ; `tests/e2e/playback.spec.ts` : reprise après rechargement, Media Session, pré-chargement du titre suivant ; `tests/e2e/quality.spec.ts` : réglage « Qualité », persistance, requête `?q=light`). Le catalogue e2e vient de `tests/e2e/fixtures/` (deux WAV de trente secondes et un manifeste), importé par `scripts/e2e/start-server.sh` avant le démarrage du serveur |
+| Deploy      | Hadolint, mock OIDC sur l'hôte, Compose avec `docker-compose.ci.yml` (variables OIDC de développement), image, healthcheck, puis `stack-check.sh` : `/healthz`, HTML, `/api/session` 401, `/api/auth/login` 302 vers le mock, 404 (dont `/Drops.mp3`, médias non publics), `/api/catalog` 401 sans session, uid 101, `/app` en lecture seule                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| CI required | Refuse tout échec, annulation ou contrôle ignoré                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Lint et scans démarrent ensemble. Build et validation Docker attendent le lint ; les tests attendent le build. Les rapports JUnit, traces Playwright et SBOM sont gardés 14 jours. Les sorties sont privées, rattachées au run GitHub.
 
@@ -63,6 +63,8 @@ Un fichier `.env` est obligatoire à côté de `docker-compose.yml` (modèle : `
 - Obligatoires : `APP_URL` (origine publique, en HTTPS), `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (64 caractères hexadécimaux, `openssl rand -hex 32`).
 - Facultatives : `PORT`, `DATA_DIR`, `OIDC_GROUPS_CLAIM`, `OIDC_GROUP_ADMIN`, `OIDC_GROUP_USERS`, `SESSION_TTL_HOURS`, `MAX_UPLOAD_MB`, `TRUST_PROXY`, `NODE_ENV`.
 
+`MAX_UPLOAD_MB` (défaut 200) plafonne la taille d'un fichier importé depuis le panneau ; au-delà, l'API répond 413 `too_large` et le panneau refuse le fichier avant l'envoi (`GET /api/admin/limits`). Les pochettes déposées à la main sont limitées à 5 Mio, indépendamment de cette variable. Pour un reverse proxy, prévoir une limite de corps au moins égale.
+
 Sans variable obligatoire, le conteneur journalise `Configuration error: ...` et s'arrête. Si l'émetteur OIDC est momentanément injoignable, le démarrage réessaie pendant un peu plus d'une minute (événement `oidc.discovery_retry`) avant d'abandonner (63 s d'attente cumulée, d'où un `start_period` de 70 s pour le healthcheck).
 
 `PLAYER_DATA_PATH` choisit le stockage de `/data` : un chemin de l'hôte (bind, propriétaire uid 101) ou un nom de volume. Par défaut, le volume nommé `player-data`.
@@ -91,6 +93,80 @@ Le job `deploy:stack` valide un environnement Docker éphémère. L'instance ré
 4. Déployer uniquement un commit dont `CI required` a réussi. L'autodeploy natif sur push est à laisser désactivé tant qu'un déclenchement après réussite de la CI n'est pas connecté ; il pourrait démarrer avant les contrôles.
 
 Voir la [documentation officielle Dokploy](https://docs.dokploy.com/docs/core/auto-deploy) pour le déclenchement par API après CI.
+
+### Migration du catalogue
+
+Le script importe un dossier de fichiers audio existant (récursif) dans le catalogue, sans jamais modifier ni supprimer les fichiers sources. Les sous-dossiers deviennent des dossiers du catalogue ; le manifeste (JSON : `name`, `author`, `url`, `folder`, pochette) fournit titre, artiste, dossier et pochette. Sauvegarder d'abord le volume `/data`. Les sources et le manifeste sont montés en lecture seule :
+
+```
+docker compose run --rm -v <dossier-de-musique>:/import:ro -v <manifeste.json>:/manifest.json:ro player node dist/server/migrate-catalog.js /import --manifest /manifest.json
+```
+
+En local : `yarn migrate:catalog <dossier> --manifest <fichier>`. Le script lit `DATA_DIR` (défaut `/data`) et n'exige pas les variables OIDC. Il affiche un rapport JSON (`imported`, `skipped`, `failed`) et sort en code 1 si un fichier a échoué. Il ne mesure pas le volume : les titres importés ainsi se rattrapent ensuite par l'analyse de l'onglet Catalogue. Il écrit dans le même `DATA_DIR` que le serveur : le lancer avec `MAINTENANCE_INTERVAL_HOURS=0` ou serveur arrêté, car une passe d'entretien concurrente pourrait voir ses répertoires comme orphelins (le délai de grâce d'1 h `MAINTENANCE_GRACE_MS` ne protège que les répertoires récents).
+
+Santé : `/healthz` est la version légère (migrations et `statfs` du `DATA_DIR` en 2 s au plus, sans comptages ni ffmpeg) ; le détail complet est `GET /api/admin/health` (admin). `503 degraded` signifie « alerter, ne pas redémarrer » : une sonde de vivacité (liveness) ne doit pas pointer dessus, seulement la disponibilité (readiness) et l'alerte.
+
+Le script est idempotent : un fichier dont l'empreinte SHA-256 est déjà au catalogue est ignoré (`skipped`), donc relancer la commande est sans risque.
+
+### Sortie réseau (recherche de métadonnées)
+
+La recherche de métadonnées du panneau appelle des services publics en HTTPS (port 443). Le serveur doit pouvoir joindre :
+
+- `musicbrainz.org` et `coverartarchive.org`, qui redirige vers `archive.org` et ses sous-domaines (`*.archive.org`) ;
+- `api.deezer.com`, et `cdn-images.dzcdn.net` / `e-cdns-images.dzcdn.net` pour les pochettes ;
+- `itunes.apple.com`, et `is1-ssl.mzstatic.com` à `is5-ssl.mzstatic.com` pour les pochettes.
+
+Tout autre domaine est refusé pour les pochettes, quelle que soit la réponse d'un fournisseur. Sans cette sortie, `GET /api/admin/metadata/search` répond `partial: true` (certains fournisseurs seulement) ou 502 `provider_error` (aucun), et appliquer une pochette échoue en `cover_rejected` : le reste de l'application (lecture, import, édition manuelle) n'est pas affecté. Les pare-feu sortants peuvent donc rester fermés si la recherche n'est pas utilisée.
+
+### Sauvegarde
+
+Tout l'état est dans le volume `/data` (`PLAYER_DATA_PATH`) : base SQLite (catalogue, sessions, audit `admin_events`), `media/` et `incoming/`. Le sauvegarder en entier, arrêt du conteneur ou instantané de volume cohérent, avant une migration, une montée de version ou un import massif. Restaurer le volume avec l'image correspondante (voir Promotion et retour arrière).
+
+### Recette du panneau d'administration
+
+Après un déploiement, avec Authentik réel :
+
+1. Se connecter avec un compte du groupe `admin` : le bouton d'administration apparaît à côté de la déconnexion et ouvre le panneau.
+2. Importer un fichier FLAC, MP3 ou WAV (zone de dépôt, clic ou glisser-déposer) : l'import passe de `processing` à `ready` et le titre apparaît dans la liste et dans le lecteur après rafraîchissement du catalogue (60 s au plus).
+3. Déposer le même fichier : l'import échoue avec la raison `duplicate`.
+4. Après les migrations 4 et 5 (volume, colonne `loudness_measured_at`) : dans l'onglet Catalogue, la ligne « Volume : n titres sur m analysés » s'affiche ; cliquer sur « Analyser les titres restants » et suivre les compteurs : l'état se relit toutes les 2 s tant que la passe tourne (`running`) puis s'arrête, et le bouton se désactive. Les titres silencieux ou illisibles sortent des restants et sont comptés « n titres sans mesure » ; `updated_at` n'est pas modifié. Un ffmpeg absent donne une réponse 409 `ffmpeg_unavailable` (rien n'est mis en file). Si la ligne indique « ffmpeg introuvable sur le serveur », vérifier `FFMPEG_PATH` (voir `.env.example`) ; l'image Docker embarque ffmpeg.
+5. Modifier titre, artiste, album, dossier, pochette ; vérifier la lecture et la pochette mises à jour.
+6. Lancer une recherche de métadonnées, appliquer une proposition avec sa pochette (nécessite la sortie réseau ci-dessus).
+7. Supprimer le titre de test et le dossier de test.
+8. Avec un compte du groupe `users` seul : le bouton est absent et `curl -H 'X-Requested-With: player' -b <cookie> .../api/admin/folders` renvoie 403 `admin_required`.
+9. Après la migration 6 : déposer un dossier contenant des sous-dossiers et des fichiers audio dans la zone de dépôt (ou « Importer un dossier ») : l'arborescence est recréée sous le dossier sélectionné et chaque titre s'y range ; un dossier de plus de 500 fichiers affiche « Trop de fichiers (500 max) » sans rien envoyer.
+10. Importer par URL une adresse locale ou privée (par exemple `https://127.0.0.1/a.mp3` est refusée d'emblée, `https://localhost/a.mp3` échoue) : l'import passe à `failed` avec un message de téléchargement (adresse refusée) ; une URL publique valide vers un WAV ou MP3 donne un titre dans le dossier sélectionné.
+11. Cocher plusieurs titres : « Déplacer vers… » les range dans le dossier choisi, « Artiste… » puis « Appliquer » change l'artiste des deux, « Supprimer » puis « Oui » les retire ; la bannière indique le nombre de titres touchés.
+12. Après la migration 8 (diffusion audio) : dans l'onglet Catalogue, la ligne « Lecture allégée : n titres sur m prêts » s'affiche sous « Volume ». Après un déploiement, cliquer sur « Préparer les titres restants » (ou attendre : la passe démarre d'elle-même après le premier import) : elle convertit les titres WAV en FLAC (« n titres WAV à convertir ») et encode la variante allégée ; l'état se relit toutes les 2 s tant qu'elle tourne. Les titres sans variante sont comptés « n titres sans variante ». Côté lecteur, le bouton « Qualité » (Auto, Max, Allégée) change la variante lue ; `GET /api/media/<id>?q=light` répond `audio/mp4` une fois la variante prête. Derrière un reverse proxy : laisser passer `Range`, `If-None-Match` et `If-Range`, et ne pas mettre en cache les réponses `private`.
+13. Dans l'onglet Catalogue, sous la ligne « Volume » : la ligne « Système : v<version> · <espace libre> libres · migrations n/n » s'affiche (en rouge avec « dégradé : <raisons> » si `/healthz` répond 503) et la ligne « Entretien : jamais lancé » ou « dernière passe <date> (…) » ; cliquer sur « Lancer l'entretien » met la date à jour. `curl -i http://localhost:8080/healthz` répond `200 ok`.
+
+### Recette des demandes de sons
+
+1. Avec un compte du groupe `users` : « Demander un son » sous la file d'attente ouvre le modal ; saisir un titre puis « Demander » affiche « Demande envoyée » et la ligne « En attente » dans « Mes demandes ».
+2. Avec un compte `admin`, onglet « Demandes » du panneau : la demande apparaît ; « Valider » la passe à « Acceptée », « Supprimer » puis « Oui » la retire.
+3. De retour côté utilisateur : la demande validée affiche « Acceptée », la demande supprimée a disparu.
+4. Avec un compte `users` : `GET /api/admin/requests` renvoie 403 `admin_required`.
+5. Avec un compte `admin`, « Importer » sur une demande puis le choix d'un fichier audio : le panneau bascule sur l'onglet Catalogue, la file affiche « <fichier> → <titre demandé> » ; la demande passe à « Ajoutée » et « Voir le titre » ouvre le titre, qui porte le titre, l'artiste et l'album demandés.
+6. Côté utilisateur : le bouton « Demander un son » affiche « (1) » ; dans le modal, la ligne « Ajoutée » propose « Écouter », qui lance le titre. Rouvrir le modal remet le compteur à zéro.
+7. Avec un compte `admin`, « Refuser » puis un motif et « Confirmer » : l'utilisateur voit « Refusée : <motif> ».
+
+## Publication de l'image (GHCR)
+
+L'image de production est publiée sur `ghcr.io/itsmariusbc/player`, en `linux/amd64` et `linux/arm64`. Un tag `vX.Y.Z` poussé sur `production` déclenche `release.yml` : Hadolint, construction multi-plateformes, envoi vers GHCR avec les tags `X.Y.Z`, `X.Y`, `sha-<court>` et `latest` (sauf pré-version `vX.Y.Z-rc.1`, qui ne reçoit ni `X.Y` ni `latest`), puis création de la release GitHub avec les notes générées, la référence de l'image et son digest. Le jeton du workflow est limité à `packages: write` pour l'image et `contents: write` pour la release ; aucun secret supplémentaire n'est requis. `workflow_dispatch` reconstruit l'image du commit courant (tag `sha-<court>` seulement, pas de release).
+
+Publier une version :
+
+```sh
+git checkout production && git pull
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+Tant que GitHub Actions reste indisponible (facturation), le même résultat s'obtient depuis un poste avec `scripts/release/publish-image.sh` : il exige d'être sur le commit du tag, un arbre propre et une session `docker login ghcr.io` ouverte avec un jeton `write:packages` (`gh auth refresh -h github.com -s write:packages,read:packages` puis `gh auth token | docker login ghcr.io -u <compte> --password-stdin`). `DRY_RUN=1` construit l'image localement sans l'envoyer. La release GitHub se crée ensuite avec `gh release create v0.1.0 --verify-tag --generate-notes`.
+
+Déployer : `docker pull ghcr.io/itsmariusbc/player:0.1.0`, puis la configuration de la section Déploiement (variables `.env`, volume `/data`). Préférer le tag exact `X.Y.Z` à `latest` en production pour un retour arrière reproductible.
+
+Le paquet GHCR est privé par défaut comme le dépôt ; un hôte de déploiement doit se connecter à `ghcr.io` avec un jeton `read:packages`.
 
 ## Promotion et retour arrière
 

@@ -1,6 +1,6 @@
 // lib/hooks/use-song-gradient.ts
 import { useEffect, useState } from "react";
-import { Song } from "@/music/data";
+import type { Song } from "@/lib/catalog";
 import { DEFAULT_GRADIENT, getSongGradient, GradientColors } from "@/lib/palette";
 
 /**
@@ -18,7 +18,7 @@ export function useSongGradient(song: Song | undefined): GradientColors {
     return () => {
       cancelled = true;
     };
-  }, [song?.picture, song?.gradient]);
+  }, [song?.picture]);
 
   return gradient;
 }

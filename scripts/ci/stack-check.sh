@@ -49,11 +49,11 @@ esac
 expect_status 404 /assets/
 expect_status 404 /server/main.js
 
-# Range sur un média statique, conservé jusqu'à l'incrément 2 (médias privés).
-expect_status 206 /Drops.mp3 -H 'Range: bytes=0-127'
-grep -qi '^content-range: bytes 0-127/' "$tmp/body.headers" \
-  || fail "/Drops.mp3 : Content-Range absent"
-[ "$(wc -c < "$tmp/body" | tr -d ' ')" -eq 128 ] || fail "/Drops.mp3 : 128 octets attendus"
+# Les médias ne sont plus publics : le catalogue exige une session.
+expect_status 404 /Drops.mp3
+expect_status 401 /api/catalog
+grep -Eq '"code" *: *"session_required"' "$tmp/body" \
+  || fail "/api/catalog : error.code différent de session_required"
 
 uid="$(docker compose exec -T player id -u | tr -d '\r')"
 [ "$uid" = 101 ] || fail "uid $uid, attendu 101"

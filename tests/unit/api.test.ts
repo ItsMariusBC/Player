@@ -41,6 +41,11 @@ describe("api", () => {
     expect((err as ApiError).code).toBe("session_expired");
   });
 
+  test("resolves undefined on 204 No Content", async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    expect(await api("/api/admin/tracks/t", { method: "DELETE" })).toBeUndefined();
+  });
+
   test("rejects a 200 with a non-JSON body as bad_response", async () => {
     globalThis.fetch = (async () =>
       new Response("<html>", { status: 200 })) as unknown as typeof fetch;

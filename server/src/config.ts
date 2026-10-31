@@ -2,6 +2,7 @@ export interface AppConfig {
   appUrl: URL;
   port: number;
   dataDir: string;
+  ffmpegPath: string;
   nodeEnv: "development" | "production" | "test";
   oidc: {
     issuer: string;
@@ -17,6 +18,11 @@ export interface AppConfig {
     groupsRecheckMs: number;
   };
   trustProxy: boolean;
+  maxUploadBytes: number;
+  /** Free space under DATA_DIR below which the health check reports degraded. */
+  minFreeBytes: number;
+  /** Hours between maintenance passes; 0 disables the schedule. */
+  maintenanceIntervalHours: number;
   /** Dev-only login bypass, always false in production. */
   devBypass: boolean;
 }
@@ -25,6 +31,7 @@ type Env = Record<string, string | undefined>;
 
 const HOUR_MS = 3_600_000;
 const GROUPS_RECHECK_MS = 15 * 60 * 1000;
+const BYTES_PER_MB = 1024 * 1024;
 const SECRET_BYTES = 32;
 const NODE_ENVS = ["development", "production", "test"] as const;
 
@@ -52,6 +59,36 @@ function positiveNumber(env: Env, name: string, fallback: number): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) {
     throw new ConfigError(`${name} must be a positive number, got "${raw}"`);
+  }
+  return value;
+}
+
+function parseMaxUploadBytes(env: Env): number {
+  const raw = env.MAX_UPLOAD_MB?.trim();
+  if (!raw) return 200 * BYTES_PER_MB;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`MAX_UPLOAD_MB must be a positive integer, got "${raw}"`);
+  }
+  return value * BYTES_PER_MB;
+}
+
+function parseMinFreeBytes(env: Env): number {
+  const raw = env.MIN_FREE_MB?.trim();
+  if (!raw) return 500 * BYTES_PER_MB;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ConfigError(`MIN_FREE_MB must be a positive integer, got "${raw}"`);
+  }
+  return value * BYTES_PER_MB;
+}
+
+function parseMaintenanceIntervalHours(env: Env): number {
+  const raw = env.MAINTENANCE_INTERVAL_HOURS?.trim();
+  if (!raw) return 24;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new ConfigError(`MAINTENANCE_INTERVAL_HOURS must be an integer >= 0, got "${raw}"`);
   }
   return value;
 }
@@ -120,6 +157,7 @@ export function loadConfig(env: Env): AppConfig {
     appUrl,
     port: parsePort(env),
     dataDir: optional(env, "DATA_DIR", "/data"),
+    ffmpegPath: optional(env, "FFMPEG_PATH", "ffmpeg"),
     nodeEnv,
     oidc: {
       issuer: required(env, "OIDC_ISSUER"),
@@ -135,6 +173,9 @@ export function loadConfig(env: Env): AppConfig {
       groupsRecheckMs: GROUPS_RECHECK_MS,
     },
     trustProxy: optional(env, "TRUST_PROXY", "false").toLowerCase() === "true",
+    maxUploadBytes: parseMaxUploadBytes(env),
+    minFreeBytes: parseMinFreeBytes(env),
+    maintenanceIntervalHours: parseMaintenanceIntervalHours(env),
     devBypass: parseDevBypass(env, nodeEnv, appUrl),
   };
 }

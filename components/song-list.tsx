@@ -1,66 +1,78 @@
 // components/song-list.tsx
-// Queue grouped by folder. Folders collapse; the one holding the current track opens itself.
+// Queue shown as the catalogue tree. Folders nest (indented per level) and work as an
+// accordion: opening one closes its siblings, and the folders holding the current track
+// open themselves. Each level lists its subfolders, then its own tracks: the queue order
+// of flattenCatalog.
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, m } from "framer-motion";
 import { MusicManager } from "@/lib/music-manager";
 import { PlaybackController } from "@/lib/playback-controller";
 import { QueueItem } from "@/lib/queue-manager";
 import { usePlaybackState } from "@/lib/hooks/use-playback-state";
+import { type FolderNode, folderAncestors, openFolderPath } from "@/lib/catalog";
 import { cn } from "@/lib/cn";
 
-interface Group {
-  folder: string | null;
-  songs: QueueItem[];
+interface TreeContext {
+  songsByFolder: Map<string | null, QueueItem[]>;
+  open: Set<string>;
+  currentId: string | undefined;
+  currentPath: string[];
+  onToggle: (folderId: string) => void;
+  onSelect: (song: QueueItem) => void;
 }
 
-/** Folders in order of first appearance, root songs last. */
-export function groupByFolder(songs: QueueItem[]): Group[] {
-  const groups = new Map<string, Group>();
-  const root: QueueItem[] = [];
-  for (const song of songs) {
-    if (!song.folder) {
-      root.push(song);
-      continue;
-    }
-    let group = groups.get(song.folder);
-    if (!group) {
-      group = { folder: song.folder, songs: [] };
-      groups.set(song.folder, group);
-    }
-    group.songs.push(song);
-  }
-  const result = [...groups.values()];
-  if (root.length > 0) result.push({ folder: null, songs: root });
-  return result;
+function countTracks(node: FolderNode, songsByFolder: Map<string | null, QueueItem[]>): number {
+  let total = songsByFolder.get(node.id)?.length ?? 0;
+  for (const child of node.children) total += countTracks(child, songsByFolder);
+  return total;
 }
 
-export function SongList({ music, playback }: { music: MusicManager; playback: PlaybackController }) {
+export function SongList({
+  music,
+  playback,
+  folders,
+}: {
+  music: MusicManager;
+  playback: PlaybackController;
+  folders: FolderNode[];
+}) {
   const { songs, currentSong } = usePlaybackState(music);
-  const groups = useMemo(() => groupByFolder(songs), [songs]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
-    for (const song of songs) if (song.folder && song.folder !== currentSong?.folder) initial.add(song.folder);
-    return initial;
-  });
+  const ancestors = useMemo(() => folderAncestors(folders), [folders]);
+  const songsByFolder = useMemo(() => {
+    const map = new Map<string | null, QueueItem[]>();
+    for (const song of songs) {
+      const list = map.get(song.folderId);
+      if (list) list.push(song);
+      else map.set(song.folderId, [song]);
+    }
+    return map;
+  }, [songs]);
+  const currentFolderId = currentSong?.folderId ?? null;
+  const currentPath = useMemo(
+    () => (currentFolderId === null ? [] : (ancestors.get(currentFolderId) ?? [])),
+    [ancestors, currentFolderId],
+  );
 
-  // The folder of the track being played always opens.
+  // Open folders; everything else is collapsed.
+  const [open, setOpen] = useState<Set<string>>(() => new Set(currentPath));
+
+  // The folders on the path of the track being played always open (closing their siblings).
   useEffect(() => {
-    const folder = currentSong?.folder;
-    if (!folder) return;
-    setCollapsed((prev) => {
-      if (!prev.has(folder)) return prev;
-      const next = new Set(prev);
-      next.delete(folder);
-      return next;
+    if (currentPath.length === 0) return;
+    setOpen((prev) => {
+      if (currentPath.every((id) => prev.has(id))) return prev;
+      return openFolderPath(prev, currentPath, ancestors);
     });
-  }, [currentSong?.folder]);
+  }, [currentPath, ancestors]);
 
-  const toggle = (folder: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(folder)) next.delete(folder);
-      else next.add(folder);
-      return next;
+  const toggle = (folderId: string) =>
+    setOpen((prev) => {
+      if (prev.has(folderId)) {
+        const next = new Set(prev);
+        next.delete(folderId);
+        return next;
+      }
+      return openFolderPath(prev, [folderId], ancestors);
     });
 
   if (songs.length === 0) {
@@ -72,53 +84,43 @@ export function SongList({ music, playback }: { music: MusicManager; playback: P
     );
   }
 
+  const context: TreeContext = {
+    songsByFolder,
+    open,
+    currentId: currentSong?.id,
+    currentPath,
+    onToggle: toggle,
+    onSelect: playback.playSong,
+  };
+  const rootSongs = songsByFolder.get(null) ?? [];
+
   return (
     <div className="space-y-1">
-      {groups.map((group) =>
-        group.folder === null ? (
-          <div key="root" className="space-y-1">
-            {group.songs.map((song) => (
-              <SongRow key={song.id} song={song} active={song.id === currentSong?.id} onSelect={playback.playSong} />
-            ))}
-          </div>
-        ) : (
-          <Folder
-            key={group.folder}
-            name={group.folder}
-            songs={group.songs}
-            open={!collapsed.has(group.folder)}
-            currentId={currentSong?.id}
-            onToggle={() => toggle(group.folder as string)}
-            onSelect={playback.playSong}
-          />
-        ),
+      {folders.map((node) => (
+        <Folder key={node.id} node={node} context={context} />
+      ))}
+      {rootSongs.length > 0 && (
+        <div className="space-y-1">
+          {rootSongs.map((song) => (
+            <SongRow key={song.id} song={song} active={song.id === context.currentId} onSelect={context.onSelect} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function Folder({
-  name,
-  songs,
-  open,
-  currentId,
-  onToggle,
-  onSelect,
-}: {
-  name: string;
-  songs: QueueItem[];
-  open: boolean;
-  currentId: number | undefined;
-  onToggle: () => void;
-  onSelect: (song: QueueItem) => void;
-}) {
-  const holdsCurrent = songs.some((song) => song.id === currentId);
+function Folder({ node, context }: { node: FolderNode; context: TreeContext }) {
+  const open = context.open.has(node.id);
+  const holdsCurrent = context.currentPath.includes(node.id);
+  const songs = context.songsByFolder.get(node.id) ?? [];
+  const count = countTracks(node, context.songsByFolder);
   return (
     <div>
       <button
         type="button"
         aria-expanded={open}
-        onClick={onToggle}
+        onClick={() => context.onToggle(node.id)}
         className={cn(
           "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
           "hover:bg-purple-200/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-400/60",
@@ -126,9 +128,9 @@ function Folder({
       >
         <ChevronIcon className={cn("size-3.5 shrink-0 text-purple-200/60 transition-transform duration-200", open && "rotate-90")} />
         <FolderIcon className="size-4 shrink-0 text-purple-200/80" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{node.name}</span>
         {holdsCurrent && !open && <span className="size-2 rounded-full bg-purple-500 animate-pulse" />}
-        <span className="text-xs tabular-nums text-purple-200/60">{songs.length}</span>
+        <span className="text-xs tabular-nums text-purple-200/60">{count}</span>
       </button>
 
       <AnimatePresence initial={false}>
@@ -142,8 +144,11 @@ function Folder({
             transition={{ duration: 0.22, ease: "easeOut" }}
           >
             <div className="ml-4 space-y-1 border-l border-purple-100/10 pl-2 py-1">
+              {node.children.map((child) => (
+                <Folder key={child.id} node={child} context={context} />
+              ))}
               {songs.map((song) => (
-                <SongRow key={song.id} song={song} active={song.id === currentId} onSelect={onSelect} />
+                <SongRow key={song.id} song={song} active={song.id === context.currentId} onSelect={context.onSelect} />
               ))}
             </div>
           </m.div>

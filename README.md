@@ -46,6 +46,7 @@ Les modifications de titre, d'artiste et d'album sont aussi écrites dans les ta
 - `developpment` : branche par défaut, intégration du travail courant.
 - `production` : version destinée à la mise en ligne, alimentée par PR depuis `developpment`.
 - Les PR vers ces deux branches doivent passer `CI required`.
+- Un tag `vX.Y.Z` sur `production` publie l'image `ghcr.io/itsmariusbc/player` et la release GitHub (voir [docs/ci.md](docs/ci.md), « Publication de l'image »).
 
 La [documentation CI/CD](docs/ci.md) détaille les contrôles, Docker et le retour arrière.
 

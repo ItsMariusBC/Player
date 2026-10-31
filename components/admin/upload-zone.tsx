@@ -5,7 +5,7 @@
 import { useRef, useState } from "react";
 import { collectDroppedFiles, fromDataTransfer, fromFileList } from "@/lib/drop-entries";
 import type { CollectResult } from "@/lib/drop-entries";
-import type { QueueEntry } from "@/lib/import-queue";
+import { entryName, type QueueEntry } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
 export const AUDIO_ACCEPT = ".flac,.mp3,.wav,audio/*";
@@ -207,8 +207,8 @@ function ImportRow({
   return (
     <li className="flex flex-col gap-1 border-b border-purple-100/10 px-1 py-1.5 last:border-b-0">
       <div className="flex items-center justify-between gap-3">
-        <span className="min-w-0 truncate text-purple-100" title={entry.filename}>
-          {entry.filename}
+        <span className="min-w-0 truncate text-purple-100" title={entryName(entry)}>
+          {entryName(entry)}
         </span>
         <span className="flex shrink-0 items-center gap-2">
           <span className={cn("text-xs", failed ? "text-red-200/80" : "text-purple-200/70")}>

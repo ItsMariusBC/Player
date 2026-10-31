@@ -14,7 +14,9 @@ import {
   hasPendingDuplicate,
   listAllRequests,
   listUserRequests,
+  fulfilRequest,
   normalizeKey,
+  rejectRequest,
   toRequestDto,
   type RequestInput,
 } from "../src/requests/repo.ts";
@@ -68,6 +70,8 @@ describe("song request repository", () => {
       source: "deezer",
       coverUrl: "https://cdn.test/c.jpg",
       status: "pending",
+      trackId: null,
+      rejectReason: null,
       createdAt: at(1).toISOString(),
       updatedAt: at(1).toISOString(),
     });
@@ -128,6 +132,27 @@ describe("song request repository", () => {
     assert.equal(listUserRequests(db, "u1", 1).length, 1);
   });
 
+  it("never cuts open requests with the limit, whatever the number of closed ones", () => {
+    const old = createRequest(db, input({ title: "Old pending" }), at(1));
+    const accepted = createRequest(db, input({ title: "Accepted" }), at(2));
+    acceptRequest(db, accepted.id, at(3));
+    for (let i = 0; i < 30; i++) {
+      const row = createRequest(db, input({ title: `Closed ${i}` }), at(10 + i));
+      rejectRequest(db, row.id, null, at(100 + i));
+    }
+    const small = listAllRequests(db, 3);
+    assert.deepEqual(
+      small.slice(0, 2).map((r) => r.id),
+      [old.id, accepted.id],
+    );
+    assert.equal(small[2]!.status, "rejected");
+    assert.equal(small[2]!.title, "Closed 29");
+    assert.deepEqual(
+      listAllRequests(db, 2).map((r) => r.id),
+      [old.id, accepted.id],
+    );
+  });
+
   it("accepts once, then reports not_pending; null when absent", () => {
     const row = createRequest(db, input(), at(1));
     const accepted = acceptRequest(db, row.id, at(5));
@@ -150,5 +175,36 @@ describe("song request repository", () => {
     assert.equal(findRequest(db, mine.id), null);
     assert.equal(deleteRequest(db, done.id), true);
     assert.equal(deleteRequest(db, done.id), false);
+  });
+
+  it("rejects an open request with a reason, and only once", () => {
+    const row = createRequest(db, input(), at(1));
+    const rejected = rejectRequest(db, row.id, "Non", at(2));
+    assert.ok(rejected && rejected !== "not_open");
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.reject_reason, "Non");
+    assert.equal(rejected.updated_at, at(2).toISOString());
+    assert.equal(rejectRequest(db, row.id, null, at(3)), "not_open");
+    assert.equal(rejectRequest(db, "missing", null, at(3)), null);
+    const accepted = createRequest(db, input({ title: "B" }), at(4));
+    acceptRequest(db, accepted.id, at(5));
+    const second = rejectRequest(db, accepted.id, null, at(6));
+    assert.ok(second && second !== "not_open");
+    assert.equal(second.reject_reason, null);
+  });
+
+  it("fulfils an open request with its track, and only once", () => {
+    db.prepare(
+      "INSERT INTO tracks (id, title, format, size_bytes, sha256, created_at, updated_at) VALUES ('t1', 'T', 'wav', 1, 'h', 'a', 'a')",
+    ).run();
+    const row = createRequest(db, input(), at(1));
+    assert.equal(fulfilRequest(db, row.id, "t1", at(2)), true);
+    const done = findRequest(db, row.id)!;
+    assert.equal(done.status, "added");
+    assert.equal(done.track_id, "t1");
+    assert.equal(done.updated_at, at(2).toISOString());
+    assert.equal(fulfilRequest(db, row.id, "t1", at(3)), false);
+    assert.equal(rejectRequest(db, row.id, null, at(3)), "not_open");
+    assert.equal(fulfilRequest(db, "missing", "t1", at(3)), false);
   });
 });

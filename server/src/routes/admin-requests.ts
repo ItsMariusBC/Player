@@ -5,11 +5,13 @@ import { recordAdminEvent } from "../admin/events.ts";
 import { requireAdmin, type AuthEnv } from "../auth/middleware.ts";
 import { inTransaction } from "../catalog/tx.ts";
 import { jsonError } from "../http.ts";
+import { onlyKeys, optionalText } from "./catalog-errors.ts";
 import {
   acceptRequest,
   deleteRequest,
   findRequest,
   listAllRequests,
+  rejectRequest,
   toRequestDto,
 } from "../requests/repo.ts";
 
@@ -47,6 +49,43 @@ export function adminRequestRoutes(
     if (result === null) return jsonError(c, 404, "request_not_found", "Request not found");
     if (result === "not_pending") {
       return jsonError(c, 409, "request_not_pending", "Request already accepted");
+    }
+    return c.json({ request: toRequestDto(result, { withUser: true }) });
+  });
+
+  routes.post("/:id/reject", async (c) => {
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as unknown;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return jsonError(c, 400, "bad_request", "Expected { reason? }");
+    }
+    const record = body as Record<string, unknown>;
+    if (!onlyKeys(record, ["reason"])) {
+      return jsonError(c, 400, "bad_request", "Expected { reason? }");
+    }
+    const raw = record["reason"];
+    const text = raw === undefined || raw === null ? "" : optionalText(raw);
+    if (text === null) return jsonError(c, 400, "bad_request", "Invalid reason");
+    const reason = text === "" ? null : text;
+    const now = deps.now();
+    const result = inTransaction(db, () => {
+      const rejected = rejectRequest(db, id, reason, now);
+      if (rejected && rejected !== "not_open") {
+        recordAdminEvent(
+          db,
+          {
+            userId: c.get("user").id,
+            action: "request_reject",
+            detail: { requestId: id, requestedBy: rejected.user_id },
+          },
+          now,
+        );
+      }
+      return rejected;
+    });
+    if (result === null) return jsonError(c, 404, "request_not_found", "Request not found");
+    if (result === "not_open") {
+      return jsonError(c, 409, "request_not_pending", "Request already added or rejected");
     }
     return c.json({ request: toRequestDto(result, { withUser: true }) });
   });

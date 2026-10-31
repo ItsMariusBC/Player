@@ -103,6 +103,14 @@ export function createTestApp(opts: TestAppOptions = {}) {
       typeof opts.ffmpegAvailable === "function"
         ? opts.ffmpegAvailable
         : async () => opts.ffmpegAvailable ?? true,
+    cover: {
+      fetch:
+        opts.metadata?.fetch ??
+        (async () => {
+          throw new Error("network disabled in tests");
+        }),
+      resolve: opts.metadata?.resolve ?? (async () => ["93.184.216.34"]),
+    },
     download: {
       maxBytes: config.maxUploadBytes,
       fetch:

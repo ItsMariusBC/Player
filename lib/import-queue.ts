@@ -23,6 +23,8 @@ export interface QueueEntry {
   kind: "file" | "url";
   filename: string;
   size: number;
+  /** Title of the song request this import fulfils, when it comes from the requests tab. */
+  requestTitle?: string;
   status: EntryStatus;
 }
 
@@ -33,7 +35,13 @@ export interface QueueState {
 export type QueueAction =
   | {
       type: "add";
-      files: { key: string; kind?: "file" | "url"; filename: string; size: number }[];
+      files: {
+        key: string;
+        kind?: "file" | "url";
+        filename: string;
+        size: number;
+        requestTitle?: string;
+      }[];
       /** null when the limit is unknown: no check before sending. */
       maxUploadBytes: number | null;
     }
@@ -160,6 +168,11 @@ export interface LabelContext {
   maxUploadBytes: number | null;
   /** Title of a catalogue track, undefined when it is not there. */
   titleOf: (trackId: string) => string | undefined;
+}
+
+/** The row's file name, followed by « → titre demandé » for an import made from a request. */
+export function entryName(entry: Pick<QueueEntry, "filename" | "requestTitle">): string {
+  return entry.requestTitle ? `${entry.filename} → ${entry.requestTitle}` : entry.filename;
 }
 
 export function entryLabel(entry: QueueEntry, ctx: LabelContext): string {

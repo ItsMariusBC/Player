@@ -201,7 +201,7 @@ export async function applyMetadata(
 export function uploadFile(
   file: File,
   onProgress: (ratio: number) => void,
-  opts: { signal?: AbortSignal; folderId?: string | null } = {},
+  opts: { signal?: AbortSignal; folderId?: string | null; requestId?: string | null } = {},
 ): Promise<{ importId: string }> {
   return new Promise((resolve, reject) => {
     const { signal } = opts;
@@ -244,8 +244,9 @@ export function uploadFile(
     };
     signal?.addEventListener("abort", onAbortSignal, { once: true });
     const body = new FormData();
-    // The server reads folderId only when it comes before the file part.
+    // The server reads folderId and requestId only when they come before the file part.
     if (opts.folderId) body.append("folderId", opts.folderId);
+    if (opts.requestId) body.append("requestId", opts.requestId);
     body.append("file", file);
     xhr.send(body);
   });

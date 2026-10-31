@@ -4,20 +4,40 @@ import {
   pendingCount,
   requestDetails,
   requestErrorMessage,
+  requestStatusDetail,
   requestStatusLabel,
   sortAdminRequests,
 } from "../../lib/requests-format";
 
-const req = (id: string, status: "pending" | "accepted", createdAt: string) => ({
+const req = (
+  id: string,
+  status: "pending" | "accepted" | "added" | "rejected",
+  createdAt: string,
+) => ({
   id,
   status,
   createdAt,
 });
 
 describe("requestStatusLabel", () => {
-  test("labels both statuses", () => {
+  test("labels the four statuses", () => {
     expect(requestStatusLabel("pending")).toBe("En attente");
-    expect(requestStatusLabel("accepted")).toBe("Validée");
+    expect(requestStatusLabel("accepted")).toBe("Acceptée");
+    expect(requestStatusLabel("added")).toBe("Ajoutée");
+    expect(requestStatusLabel("rejected")).toBe("Refusée");
+  });
+});
+
+describe("requestStatusDetail", () => {
+  test("appends the reason of a rejected request", () => {
+    expect(requestStatusDetail({ status: "rejected", rejectReason: "Doublon" })).toBe(
+      "Refusée : Doublon",
+    );
+  });
+  test("plain label without a reason or for other statuses", () => {
+    expect(requestStatusDetail({ status: "rejected", rejectReason: null })).toBe("Refusée");
+    expect(requestStatusDetail({ status: "rejected", rejectReason: "  " })).toBe("Refusée");
+    expect(requestStatusDetail({ status: "added", rejectReason: null })).toBe("Ajoutée");
   });
 });
 
@@ -70,6 +90,9 @@ describe("requestErrorMessage", () => {
     );
     expect(requestErrorMessage(new ApiError(404, "request_not_found", "x"))).toBe(
       "Cette demande n'existe plus",
+    );
+    expect(requestErrorMessage(new ApiError(409, "request_not_pending", "x"))).toBe(
+      "Cette demande a déjà été traitée",
     );
   });
   test("falls back to the message, then to a generic one", () => {

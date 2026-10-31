@@ -19,12 +19,16 @@ export interface IngestInput {
   /** Explicit values win over the tags. */
   title?: string;
   artist?: string;
+  album?: string;
   /** Used when neither an explicit title nor a tag exists. */
   fallbackTitle?: string;
   /** Lazy: called only once the file is known to be new, so duplicates have no side effects. */
   folderId?: () => string | null;
-  /** Lazy, same rule. An explicit cover (non-null) wins over the embedded one. */
-  cover?: () => Promise<ProbeResult["cover"]>;
+  /**
+   * Lazy, same rule. An explicit cover (non-null) wins over the embedded one. Called with whether
+   * the file carries an embedded cover, so a caller can skip a download it would not use.
+   */
+  cover?: (embedded: boolean) => Promise<ProbeResult["cover"]>;
   /** Loudness measurement; injected so tests never run ffmpeg. Omitted: not measured. Must not throw. */
   measure?: (file: string) => Promise<Loudness | null>;
   now: Date;
@@ -58,7 +62,7 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
   } catch {
     // A failed measurement never fails the import; the backfill can retry later.
   }
-  const cover = (await input.cover?.()) ?? probe.cover;
+  const cover = (await input.cover?.(probe.cover !== null)) ?? probe.cover;
   const trackId = crypto.randomUUID();
   await storage.publish(importId, trackId, file, probe.format, cover);
   try {
@@ -72,7 +76,7 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
           folderId: folder,
           title: input.title ?? probe.title ?? input.fallbackTitle ?? "Untitled",
           artist: input.artist ?? probe.artist ?? "",
-          album: probe.album ?? "",
+          album: input.album ?? probe.album ?? "",
           durationMs: probe.durationMs,
           format: probe.format,
           sizeBytes: probe.sizeBytes,

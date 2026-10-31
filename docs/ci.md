@@ -142,9 +142,12 @@ Après un déploiement, avec Authentik réel :
 ### Recette des demandes de sons
 
 1. Avec un compte du groupe `users` : « Demander un son » sous la file d'attente ouvre le modal ; saisir un titre puis « Demander » affiche « Demande envoyée » et la ligne « En attente » dans « Mes demandes ».
-2. Avec un compte `admin`, onglet « Demandes » du panneau : la demande apparaît ; « Valider » la passe à « Validée », « Supprimer » puis « Oui » la retire.
-3. De retour côté utilisateur : la demande validée affiche « Validée », la demande supprimée a disparu.
+2. Avec un compte `admin`, onglet « Demandes » du panneau : la demande apparaît ; « Valider » la passe à « Acceptée », « Supprimer » puis « Oui » la retire.
+3. De retour côté utilisateur : la demande validée affiche « Acceptée », la demande supprimée a disparu.
 4. Avec un compte `users` : `GET /api/admin/requests` renvoie 403 `admin_required`.
+5. Avec un compte `admin`, « Importer » sur une demande puis le choix d'un fichier audio : le panneau bascule sur l'onglet Catalogue, la file affiche « <fichier> → <titre demandé> » ; la demande passe à « Ajoutée » et « Voir le titre » ouvre le titre, qui porte le titre, l'artiste et l'album demandés.
+6. Côté utilisateur : le bouton « Demander un son » affiche « (1) » ; dans le modal, la ligne « Ajoutée » propose « Écouter », qui lance le titre. Rouvrir le modal remet le compteur à zéro.
+7. Avec un compte `admin`, « Refuser » puis un motif et « Confirmer » : l'utilisateur voit « Refusée : <motif> ».
 
 ## Promotion et retour arrière
 

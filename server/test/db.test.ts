@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { openDatabase } from "../src/db.ts";
-import { migrate } from "../src/migrations.ts";
+import { MIGRATIONS, migrate } from "../src/migrations.ts";
 
 describe("database", () => {
   it("applies migrations once and is idempotent", () => {
     const db = openDatabase(":memory:");
-    assert.equal(migrate(db), 6);
+    assert.equal(migrate(db), 7);
     assert.equal(migrate(db), 0);
     db.close();
   });
@@ -151,6 +151,81 @@ describe("imports folder and source columns", () => {
     assert.equal(rows[0].folder_id, null);
     assert.equal(rows[0].source_url, "https://x/a.wav");
     assert.equal(rows[1].source_url, null);
+    db.close();
+  });
+});
+
+describe("migration 7: song request lifecycle", () => {
+  const upTo = (db: ReturnType<typeof openDatabase>, id: number) => {
+    db.exec("CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, applied_at TEXT)");
+    for (const m of MIGRATIONS.filter((x) => x.id <= id)) {
+      db.exec(m.sql);
+      db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, 'a')").run(m.id);
+    }
+  };
+
+  it("rebuilds song_requests keeping rows and indexes, and widens the statuses", () => {
+    const db = openDatabase(":memory:");
+    upTo(db, 6);
+    db.prepare(
+      "INSERT INTO users (id, issuer, subject, created_at, last_seen_at) VALUES ('u', 'i', 's', 'a', 'a')",
+    ).run();
+    const insert = db.prepare(
+      "INSERT INTO song_requests (id, user_id, title, artist, album, year, source, cover_url, status, created_at, updated_at) VALUES (?, 'u', ?, 'Art', 'Alb', 1999, 'deezer', 'https://c/x', ?, 'c', 'd')",
+    );
+    insert.run("r1", "One", "pending");
+    insert.run("r2", "Two", "accepted");
+    assert.equal(migrate(db), 1);
+    const rows = db.prepare("SELECT * FROM song_requests ORDER BY id").all() as any[];
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((r) => [r.id, r.title, r.artist, r.album, r.year, r.source, r.cover_url, r.status]),
+      [
+        ["r1", "One", "Art", "Alb", 1999, "deezer", "https://c/x", "pending"],
+        ["r2", "Two", "Art", "Alb", 1999, "deezer", "https://c/x", "accepted"],
+      ],
+    );
+    assert.equal(rows[0].track_id, null);
+    assert.equal(rows[0].reject_reason, null);
+    assert.equal(rows[0].created_at, "c");
+    assert.equal(rows[0].updated_at, "d");
+    const indexes = (
+      db.prepare("PRAGMA index_list(song_requests)").all() as { name: string }[]
+    ).map((i) => i.name);
+    assert.ok(indexes.includes("song_requests_status_created"));
+    assert.ok(indexes.includes("song_requests_user"));
+    assert.equal(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'song_requests_new'").get(),
+      undefined,
+    );
+    const insertNew = db.prepare(
+      "INSERT INTO song_requests (id, user_id, title, source, status, created_at, updated_at) VALUES (?, 'u', 'T', 'manual', ?, 'a', 'a')",
+    );
+    insertNew.run("r3", "added");
+    insertNew.run("r4", "rejected");
+    assert.throws(() => insertNew.run("r5", "done"), /CHECK constraint/);
+    db.close();
+  });
+
+  it("links a track (nulled when it is deleted) and adds imports.request_id", () => {
+    const db = openDatabase(":memory:");
+    migrate(db);
+    db.prepare(
+      "INSERT INTO users (id, issuer, subject, created_at, last_seen_at) VALUES ('u', 'i', 's', 'a', 'a')",
+    ).run();
+    db.prepare(
+      "INSERT INTO tracks (id, title, format, size_bytes, sha256, created_at, updated_at) VALUES ('t', 'T', 'wav', 1, 'h', 'a', 'a')",
+    ).run();
+    db.prepare(
+      "INSERT INTO song_requests (id, user_id, title, source, status, track_id, created_at, updated_at) VALUES ('r', 'u', 'T', 'manual', 'added', 't', 'a', 'a')",
+    ).run();
+    db.prepare(
+      "INSERT INTO imports (id, user_id, filename, state, request_id, created_at, updated_at) VALUES ('i', 'u', 'a.wav', 'processing', 'r', 'a', 'a')",
+    ).run();
+    db.prepare("DELETE FROM tracks WHERE id = 't'").run();
+    assert.equal((db.prepare("SELECT track_id FROM song_requests").get() as any).track_id, null);
+    db.prepare("DELETE FROM song_requests WHERE id = 'r'").run();
+    assert.equal((db.prepare("SELECT request_id FROM imports").get() as any).request_id, null);
     db.close();
   });
 });

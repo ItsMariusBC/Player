@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  batchResultLabel,
+  selectionLabel,
   metadataResultsNotice,
   nextMetadataResults,
   isMetadataQueryValid,
@@ -195,5 +197,29 @@ describe("metadata results state", () => {
     expect(
       metadataResultsNotice({ proposals: [proposal("a")], partial: false, retry: false }),
     ).toBe(null);
+  });
+});
+
+describe("batch labels", () => {
+  test("selectionLabel pluralizes", () => {
+    expect(selectionLabel(1)).toBe("1 titre sélectionné");
+    expect(selectionLabel(3)).toBe("3 titres sélectionnés");
+  });
+
+  test("batchResultLabel", () => {
+    expect(batchResultLabel({ updated: 1, missing: 0 })).toBe("1 titre mis à jour");
+    expect(batchResultLabel({ updated: 4, missing: 0 })).toBe("4 titres mis à jour");
+    expect(batchResultLabel({ deleted: 1, missing: 0 })).toBe("1 titre supprimé");
+    expect(batchResultLabel({ deleted: 2, missing: 1 })).toBe("2 titres supprimés, 1 introuvable");
+    expect(batchResultLabel({ updated: 2, missing: 3 })).toBe(
+      "2 titres mis à jour, 3 introuvables",
+    );
+    expect(batchResultLabel({ updated: 2, missing: 0, failed: 1 })).toBe(
+      "2 titres mis à jour, 1 échec",
+    );
+    expect(batchResultLabel({ deleted: 1, missing: 1, failed: 3 })).toBe(
+      "1 titre supprimé, 1 introuvable, 3 échecs",
+    );
+    expect(batchResultLabel({ updated: 2, missing: 0, failed: 0 })).toBe("2 titres mis à jour");
   });
 });

@@ -26,6 +26,11 @@ export interface TestAppOptions {
   ffmpegAvailable?: boolean;
   /** Leaves `metadata` out of the app deps, as when no provider is configured. */
   withoutMetadata?: boolean;
+  /** Import by URL: fetch/resolve for the download; nothing reaches the network. */
+  download?: {
+    fetch?: typeof globalThis.fetch;
+    resolve?: (host: string) => Promise<string[]>;
+  };
   /** Metadata providers and the cover guard's fetch/resolve; nothing reaches the network. */
   metadata?: {
     providers?: MetadataProvider[];
@@ -86,6 +91,15 @@ export function createTestApp(opts: TestAppOptions = {}) {
     now: clock,
     measure: opts.measure ?? (async () => null),
     ffmpegAvailable: async () => opts.ffmpegAvailable ?? true,
+    download: {
+      maxBytes: config.maxUploadBytes,
+      fetch:
+        opts.download?.fetch ??
+        (async () => {
+          throw new Error("network disabled in tests");
+        }),
+      resolve: opts.download?.resolve ?? (async () => ["93.184.216.34"]),
+    },
   });
   const metadata = createMetadataSearch({
     providers: opts.metadata?.providers ?? [],

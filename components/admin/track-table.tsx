@@ -1,9 +1,10 @@
 // components/admin/track-table.tsx
 // Centre of the admin panel: the tracks of the selected folder, in queue order. Rows select
 // the track, drag onto a folder of the tree and open the track menu on right click.
+import { useEffect, useRef } from "react";
 import type { TrackDto } from "@/lib/catalog";
 import { coverUrl } from "@/lib/catalog";
-import { TRACK_DRAG_TYPE, formatDuration } from "@/lib/admin-format";
+import { BATCH_MAX, TRACK_DRAG_TYPE, formatDuration } from "@/lib/admin-format";
 import { menuPoint } from "@/components/admin/folder-tree";
 import { cn } from "@/lib/cn";
 
@@ -13,15 +14,31 @@ const cellClass = "px-2 py-1.5";
 export function TrackTable({
   tracks,
   selectedId,
+  selectedIds,
   onSelect,
+  onToggle,
+  onToggleAll,
   onTrackMenu,
 }: {
   /** Already sorted (tracksInFolder). */
   tracks: TrackDto[];
   selectedId: string | null;
+  /** Tracks ticked for a batch action (independent from the track open in the editor). */
+  selectedIds: ReadonlySet<string>;
   onSelect: (trackId: string) => void;
+  /** Shift+click asks for the range from the last toggled box. */
+  onToggle: (trackId: string, shiftKey: boolean) => void;
+  onToggleAll: () => void;
   onTrackMenu: (trackId: string, x: number, y: number) => void;
 }) {
+  const headRef = useRef<HTMLInputElement>(null);
+  const ticked = tracks.filter((track) => selectedIds.has(track.id)).length;
+  // « Tout sélectionner » ticks at most BATCH_MAX tracks: that counts as all.
+  const all = tracks.length > 0 && ticked >= Math.min(tracks.length, BATCH_MAX);
+  useEffect(() => {
+    if (headRef.current) headRef.current.indeterminate = ticked > 0 && !all;
+  }, [ticked, all]);
+
   if (tracks.length === 0) {
     return <p className="px-2 py-6 text-sm text-purple-200/50">Aucun titre</p>;
   }
@@ -30,6 +47,16 @@ export function TrackTable({
     <table className="w-full table-fixed border-collapse text-sm">
       <thead className="sticky top-0 bg-purple-950/60 backdrop-blur-xs">
         <tr className="border-b border-purple-100/10">
+          <th scope="col" className={cn(headClass, "w-8")}>
+            <input
+              ref={headRef}
+              type="checkbox"
+              aria-label="Tout sélectionner"
+              checked={all}
+              onChange={onToggleAll}
+              className="size-4 accent-purple-400"
+            />
+          </th>
           <th scope="col" className={cn(headClass, "w-12")}>
             <span className="sr-only">Pochette</span>
           </th>
@@ -84,6 +111,21 @@ export function TrackTable({
                 event.dataTransfer.effectAllowed = "move";
               }}
             >
+              <td
+                className={cellClass}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Sélectionner ${track.title}`}
+                  checked={selectedIds.has(track.id)}
+                  // onClick, not onChange: only the click event carries shiftKey.
+                  onClick={(event) => onToggle(track.id, event.shiftKey)}
+                  onChange={() => undefined}
+                  className="size-4 accent-purple-400"
+                />
+              </td>
               <td className={cellClass}>
                 {track.hasCover ? (
                   <img

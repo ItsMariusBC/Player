@@ -6,6 +6,8 @@ export type AdminAction =
   | "folder_delete"
   | "track_update"
   | "track_delete"
+  | "track_batch_update"
+  | "track_batch_delete"
   | "cover_replace"
   | "metadata_apply"
   | "request_accept"

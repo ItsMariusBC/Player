@@ -26,6 +26,25 @@ export interface TrackPatch {
   position?: number;
 }
 
+/** Fields of a batch edit: at least one; the server validates them as the single PATCH does. */
+export interface BatchTrackPatch {
+  folderId?: string | null;
+  artist?: string;
+  album?: string;
+}
+
+export interface BatchUpdateResult {
+  updated: { id: string; tagsWritten: boolean }[];
+  missing: string[];
+  /** Tracks whose update failed on the server; the others were applied. */
+  failed?: string[];
+}
+
+export interface BatchDeleteResult {
+  deleted: string[];
+  missing: string[];
+}
+
 export interface TrackUpdateResult {
   track: TrackDto;
   /** False when the file could not be retagged (WAV, write failure): the database still is. */
@@ -64,8 +83,8 @@ export interface ImportDto {
   id: string;
   filename: string;
   state: ImportState;
-  /** Set when state is failed: reason is duplicate, unsupported_format or internal. */
-  error: { reason: string; trackId?: string } | null;
+  /** Set when state is failed: reason is duplicate, unsupported_format, download_failed or internal. */
+  error: { reason: string; trackId?: string; detail?: string } | null;
   trackId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -118,6 +137,14 @@ export async function deleteTrack(trackId: string): Promise<void> {
   await api<void>(`/api/admin/tracks/${id(trackId)}`, { method: "DELETE" });
 }
 
+export function batchUpdateTracks(ids: string[], patch: BatchTrackPatch): Promise<BatchUpdateResult> {
+  return api<BatchUpdateResult>("/api/admin/tracks/batch", json("POST", { ids, patch }));
+}
+
+export function batchDeleteTracks(ids: string[]): Promise<BatchDeleteResult> {
+  return api<BatchDeleteResult>("/api/admin/tracks/batch-delete", json("POST", { ids }));
+}
+
 /** JPEG, PNG or WebP up to 5 MiB; the server checks the signature. */
 export function replaceCover(trackId: string, image: File): Promise<{ hasCover: true }> {
   const body = new FormData();
@@ -168,13 +195,13 @@ export async function applyMetadata(
 // Imports
 
 /**
- * Sends one audio file to the import queue. onProgress receives the uploaded ratio (0 to 1),
+ * Sends one audio file to the import queue (into folderId when given, else the inbox). onProgress receives the uploaded ratio (0 to 1),
  * and 1 once the server answered. Resolves with the importId to poll with getImport.
  */
 export function uploadFile(
   file: File,
   onProgress: (ratio: number) => void,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; folderId?: string | null } = {},
 ): Promise<{ importId: string }> {
   return new Promise((resolve, reject) => {
     const { signal } = opts;
@@ -217,9 +244,19 @@ export function uploadFile(
     };
     signal?.addEventListener("abort", onAbortSignal, { once: true });
     const body = new FormData();
+    // The server reads folderId only when it comes before the file part.
+    if (opts.folderId) body.append("folderId", opts.folderId);
     body.append("file", file);
     xhr.send(body);
   });
+}
+
+/** Asks the server to download an https URL into the import queue; poll the importId. */
+export function importUrl(url: string, folderId: string | null): Promise<{ importId: string }> {
+  return api<{ importId: string }>(
+    "/api/admin/imports/url",
+    json("POST", folderId ? { url, folderId } : { url }),
+  );
 }
 
 export function getImport(importId: string): Promise<ImportDto> {

@@ -59,30 +59,43 @@ export async function ingestFile(input: IngestInput): Promise<IngestResult> {
     // A failed measurement never fails the import; the backfill can retry later.
   }
   const cover = (await input.cover?.()) ?? probe.cover;
-  const folderId = input.folderId?.() ?? null;
   const trackId = crypto.randomUUID();
   await storage.publish(importId, trackId, file, probe.format, cover);
   try {
-    const track = insertTrack(
-      db,
-      {
-        id: trackId,
-        folderId,
-        title: input.title ?? probe.title ?? input.fallbackTitle ?? "Untitled",
-        artist: input.artist ?? probe.artist ?? "",
-        album: probe.album ?? "",
-        durationMs: probe.durationMs,
-        format: probe.format,
-        sizeBytes: probe.sizeBytes,
-        sha256: probe.sha256,
-        coverExt: cover?.ext ?? null,
-        status: "ready",
-        loudnessLufs: loudness?.lufs ?? null,
-        truePeakDbtp: loudness?.truePeakDbtp ?? null,
-        loudnessMeasuredAt: input.measure ? now : null,
-      },
-      now,
-    );
+    // Evaluated as late as possible: the folder may be deleted while the file is published.
+    const folderId = input.folderId?.() ?? null;
+    const insert = (folder: string | null) =>
+      insertTrack(
+        db,
+        {
+          id: trackId,
+          folderId: folder,
+          title: input.title ?? probe.title ?? input.fallbackTitle ?? "Untitled",
+          artist: input.artist ?? probe.artist ?? "",
+          album: probe.album ?? "",
+          durationMs: probe.durationMs,
+          format: probe.format,
+          sizeBytes: probe.sizeBytes,
+          sha256: probe.sha256,
+          coverExt: cover?.ext ?? null,
+          status: "ready",
+          loudnessLufs: loudness?.lufs ?? null,
+          truePeakDbtp: loudness?.truePeakDbtp ?? null,
+          loudnessMeasuredAt: input.measure ? now : null,
+        },
+        now,
+      );
+    let track: TrackRecord;
+    try {
+      track = insert(folderId);
+    } catch (error) {
+      // The folder vanished after the check: fall back to the inbox once.
+      if (folderId !== null && /FOREIGN KEY/i.test(String((error as Error).message))) {
+        track = insert(null);
+      } else {
+        throw error;
+      }
+    }
     return { kind: "ready", track };
   } catch (error) {
     await storage.removeTrack(trackId);

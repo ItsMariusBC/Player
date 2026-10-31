@@ -3,12 +3,25 @@ import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { updateTrackLoudness } from "../catalog/tracks.ts";
 import { inTransaction } from "../catalog/tx.ts";
+import { downloadToFile, type DownloadOptions } from "../media/download.ts";
 import { ingestFile } from "../media/ingest.ts";
 import { measureLoudness, type Loudness } from "../media/loudness.ts";
 import type { MediaStorage } from "../media/storage.ts";
+import { resolveHost } from "../metadata/fetch-guard.ts";
+
+/** Imports allowed in `processing` at once; further requests are answered 429 `too_many_imports`. */
+export const MAX_PROCESSING_IMPORTS = 50;
+
+/** Downloads running at once; further ones wait for a slot. */
+const DOWNLOAD_SLOTS = 2;
 
 export interface ImportQueue {
   enqueue(importId: string): void;
+  /**
+   * Downloads url into the import's incoming directory outside the serialized chain (at most
+   * two at a time), then enqueues it like an upload. A failure marks the import failed.
+   */
+  enqueueUrl(importId: string, url: string): void;
   /** Resolves once every job enqueued so far (and any running backfill pass) has finished. */
   idle(): Promise<void>;
   /**
@@ -44,6 +57,7 @@ interface ImportRow {
   id: string;
   user_id: string;
   filename: string;
+  folder_id: string | null;
 }
 
 export function createImportQueue(deps: {
@@ -55,6 +69,8 @@ export function createImportQueue(deps: {
   /** Test seams: the measurement and the ffmpeg availability check. */
   measure?: (file: string) => Promise<Loudness | null>;
   ffmpegAvailable?: () => Promise<boolean>;
+  /** Import by URL: size cap and the network seams (tests inject fetch and resolve). */
+  download: Pick<DownloadOptions, "maxBytes"> & Partial<Omit<DownloadOptions, "maxBytes">>;
 }): ImportQueue {
   const { db, storage, log } = deps;
   const now = deps.now ?? (() => new Date());
@@ -67,6 +83,60 @@ export function createImportQueue(deps: {
   let availableCached = false;
   let backfilling = false;
   const inFlight = new Set<string>();
+  const downloads = new Set<Promise<void>>();
+  const waiting: (() => void)[] = [];
+  let slots = DOWNLOAD_SLOTS;
+
+  async function acquireSlot(): Promise<void> {
+    if (slots > 0) {
+      slots -= 1;
+      return;
+    }
+    // The releasing download hands its slot over directly.
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+
+  function releaseSlot() {
+    const next = waiting.shift();
+    if (next) next();
+    else slots += 1;
+  }
+
+  async function downloadJob(importId: string, url: string): Promise<void> {
+    await acquireSlot();
+    let detail: string | null = null;
+    let errorName = "";
+    try {
+      const dest = path.join(storage.incomingDir(importId), "upload.bin");
+      const result = await downloadToFile(url, dest, {
+        resolve: resolveHost,
+        ...deps.download,
+      });
+      if (!result.ok) detail = result.detail;
+    } catch (error) {
+      detail = "unreachable";
+      errorName = error instanceof Error ? error.name : "unknown";
+    } finally {
+      releaseSlot();
+    }
+    if (detail === null) {
+      enqueue(importId);
+      return;
+    }
+    let host = "";
+    try {
+      host = new URL(url).host;
+    } catch {
+      // The route validated the URL; nothing to log then.
+    }
+    log?.("import.download_failed", { importId, detail, error: errorName, host });
+    try {
+      finish(importId, "failed", { reason: "download_failed", detail }, null);
+    } catch {
+      // The database itself is failing: nothing more can be recorded.
+    }
+    await storage.removeIncoming(importId).catch(() => {});
+  }
   const PENDING = "status = 'ready' AND loudness_measured_at IS NULL AND loudness_lufs IS NULL";
 
   function nextPending(): { id: string; format: "flac" | "mp3" | "wav" } | undefined {
@@ -138,7 +208,9 @@ export function createImportQueue(deps: {
   async function run(importId: string): Promise<void> {
     try {
       const row = db
-        .prepare("SELECT id, user_id, filename FROM imports WHERE id = ? AND state = 'processing'")
+        .prepare(
+          "SELECT id, user_id, filename, folder_id FROM imports WHERE id = ? AND state = 'processing'",
+        )
         .get(importId) as unknown as ImportRow | undefined;
       if (!row) {
         await storage.removeIncoming(importId);
@@ -151,6 +223,14 @@ export function createImportQueue(deps: {
         importId,
         file: path.join(storage.incomingDir(importId), "upload.bin"),
         measure,
+        // The folder may have been deleted since the import was accepted: then the inbox.
+        folderId: () => {
+          if (!row.folder_id) return null;
+          const folder = db.prepare("SELECT id FROM folders WHERE id = ?").get(row.folder_id) as
+            | { id: string }
+            | undefined;
+          return folder ? folder.id : null;
+        },
         fallbackTitle: path.basename(row.filename, path.extname(row.filename)) || "Untitled",
         now: stamp,
       });
@@ -191,18 +271,30 @@ export function createImportQueue(deps: {
     }
   }
 
+  function enqueue(importId: string) {
+    // run() handles its own errors; the catch keeps the chain alive if even that throws.
+    chain = chain.then(() => run(importId)).catch(() => {});
+  }
+
   return {
-    enqueue(importId) {
-      // run() handles its own errors; the catch keeps the chain alive if even that throws.
-      chain = chain.then(() => run(importId)).catch(() => {});
+    enqueue,
+    enqueueUrl(importId, url) {
+      const job = downloadJob(importId, url)
+        .catch(() => {})
+        .finally(() => downloads.delete(job));
+      downloads.add(job);
     },
     async idle() {
-      // Backfill steps append to the chain as they run: wait until it stops growing.
-      let seen: Promise<void>;
-      do {
-        seen = chain;
+      // Backfill steps and finished downloads append to the chain: wait until nothing grows.
+      for (;;) {
+        if (downloads.size > 0) {
+          await Promise.all([...downloads]);
+          continue;
+        }
+        const seen = chain;
         await seen;
-      } while (seen !== chain);
+        if (seen === chain && downloads.size === 0) return;
+      }
     },
     backfillLoudness() {
       if (backfilling) return { queued: 0, running: true };

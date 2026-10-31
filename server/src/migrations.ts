@@ -58,6 +58,13 @@ ALTER TABLE tracks ADD COLUMN true_peak_dbtp REAL;
 ALTER TABLE tracks ADD COLUMN loudness_measured_at TEXT;
 `,
   },
+  {
+    id: 6,
+    sql: `
+ALTER TABLE imports ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;
+ALTER TABLE imports ADD COLUMN source_url TEXT;
+`,
+  },
 ];
 
 /** Applies pending migrations in id order, one transaction each. Returns how many ran. */

@@ -3,10 +3,15 @@
 // and one row per queued file with its progress and server state. Only drags carrying
 // files react here; a track row dragged over it is ignored.
 import { useRef, useState } from "react";
+import { collectDroppedFiles, fromDataTransfer, fromFileList } from "@/lib/drop-entries";
+import type { CollectResult } from "@/lib/drop-entries";
 import type { QueueEntry } from "@/lib/import-queue";
 import { cn } from "@/lib/cn";
 
 export const AUDIO_ACCEPT = ".flac,.mp3,.wav,audio/*";
+
+const actionButtonClass =
+  "rounded-md border border-purple-100/15 px-3 py-1 text-sm text-purple-100 transition-colors hover:border-purple-100/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-300/60";
 
 export const hasFiles = (event: { dataTransfer: DataTransfer | null }) =>
   event.dataTransfer?.types.includes("Files") ?? false;
@@ -16,6 +21,8 @@ export function UploadZone({
   idle,
   labelOf,
   onFiles,
+  onFolder,
+  onUrl,
   onShow,
   onClear,
 }: {
@@ -23,6 +30,10 @@ export function UploadZone({
   idle: boolean;
   labelOf: (entry: QueueEntry) => string;
   onFiles: (files: File[]) => void;
+  /** Audio files found in a dropped or chosen folder, with their relative paths. */
+  onFolder: (result: CollectResult) => void;
+  /** An https URL for the server to download. */
+  onUrl: (url: string) => void;
   /** Selects an imported track in the inbox. */
   onShow: (trackId: string) => void;
   onClear: () => void;
@@ -30,7 +41,9 @@ export function UploadZone({
   const inputRef = useRef<HTMLInputElement>(null);
   // dragenter/dragleave fire for every child crossed: count them.
   const depth = useRef(0);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
+  const [url, setUrl] = useState("");
 
   const openPicker = () => inputRef.current?.click();
 
@@ -71,7 +84,19 @@ export function UploadZone({
           event.preventDefault();
           depth.current = 0;
           setOver(false);
-          onFiles(Array.from(event.dataTransfer.files));
+          const { items } = event.dataTransfer;
+          // The items are emptied once this handler returns: read them now.
+          const hasDirectory = Array.from(items).some(
+            (item) => item.kind === "file" && item.webkitGetAsEntry?.()?.isDirectory,
+          );
+          if (!hasDirectory) {
+            onFiles(Array.from(event.dataTransfer.files));
+            return;
+          }
+          const entries = fromDataTransfer(items);
+          collectDroppedFiles(entries)
+            .then((result) => onFolder(result as CollectResult))
+            .catch((error: unknown) => console.error("Folder drop failed", error));
         }}
       >
         Dépose des fichiers FLAC, MP3 ou WAV ici
@@ -90,6 +115,55 @@ export function UploadZone({
           event.currentTarget.value = "";
         }}
       />
+
+      <input
+        ref={folderInputRef}
+        type="file"
+        hidden
+        tabIndex={-1}
+        // Not in React's typings: lets the picker choose a directory.
+        {...{ webkitdirectory: "" }}
+        onChange={(event) => {
+          onFolder(fromFileList(event.currentTarget.files ?? []));
+          event.currentTarget.value = "";
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className={cn(actionButtonClass)}
+          onClick={() => folderInputRef.current?.click()}
+        >
+          Importer un dossier
+        </button>
+        <form
+          aria-label="Importer depuis une URL"
+          className="flex min-w-0 flex-1 items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = url.trim();
+            if (!value.startsWith("https://")) return;
+            onUrl(value);
+            setUrl("");
+          }}
+        >
+          <input
+            type="url"
+            value={url}
+            placeholder="Importer depuis une URL"
+            aria-label="URL du fichier"
+            className="min-w-0 flex-1 rounded-md border border-purple-100/15 bg-transparent px-2 py-1 text-sm text-purple-50 placeholder:text-purple-200/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-300/60"
+            onChange={(event) => setUrl(event.target.value)}
+          />
+          <button
+            type="submit"
+            disabled={!url.trim().startsWith("https://")}
+            className={cn(actionButtonClass, "disabled:cursor-not-allowed disabled:opacity-40")}
+          >
+            Importer
+          </button>
+        </form>
+      </div>
 
       {entries.length > 0 && (
         <div className="flex flex-col gap-2">

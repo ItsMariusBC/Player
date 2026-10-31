@@ -95,14 +95,14 @@ async function tagCopy(deps: TrackEditDeps, track: TrackRecord, patch: TrackPatc
 /**
  * Applies a patch to a ready track: tags written on a scratch copy (best effort), sha256
  * collision check, one transaction for the row, the move and the admin event (its detail
- * gets tagsWritten), then the copy replaces the original. Throws TrackNotFound,
+ * gets tagsWritten; no event when omitted, for callers that audit a whole batch), then the copy replaces the original. Throws TrackNotFound,
  * UnknownFolder, or the repository's catalog errors.
  */
 export async function applyTrackPatch(
   deps: TrackEditDeps,
   trackId: string,
   patch: TrackPatch,
-  event: EditEvent,
+  event?: EditEvent,
 ): Promise<{ track: TrackRecord; tagsWritten: boolean }> {
   const { db, storage } = deps;
   const track = readyTrack(db, trackId);
@@ -141,16 +141,18 @@ export async function applyTrackPatch(
         const folderId = patch.folderId === undefined ? result.folderId : patch.folderId;
         result = moveTrack(db, trackId, folderId, patch.position, now);
       }
-      recordAdminEvent(
-        db,
-        {
-          userId: event.userId,
-          action: event.action,
-          trackId,
-          detail: { ...event.detail, tagsWritten },
-        },
-        now,
-      );
+      if (event) {
+        recordAdminEvent(
+          db,
+          {
+            userId: event.userId,
+            action: event.action,
+            trackId,
+            detail: { ...event.detail, tagsWritten },
+          },
+          now,
+        );
+      }
       return result;
     });
   } catch (error) {

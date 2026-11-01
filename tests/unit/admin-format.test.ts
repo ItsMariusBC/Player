@@ -19,6 +19,8 @@ import {
   sortTracksByPosition,
   tagsStatusLabel,
   tracksInFolder,
+  folderDropZone,
+  planFolderMove,
 } from "../../lib/admin-format";
 import type { FolderNode, TrackDto } from "../../lib/catalog";
 
@@ -299,5 +301,50 @@ describe("system labels", () => {
         lastResult: { orphanMedia: 1, orphanIncoming: 0, prunedImports: 1, durationMs: 5 },
       }),
     ).toBe("Entretien : dernière passe 27/10/2026 14:05 (1 orphelin supprimé, 1 import purgé)");
+  });
+});
+
+describe("folderDropZone", () => {
+  test("splits a row into before, inside and after bands", () => {
+    expect(folderDropZone(2, 40)).toBe("before");
+    expect(folderDropZone(20, 40)).toBe("inside");
+    expect(folderDropZone(38, 40)).toBe("after");
+    expect(folderDropZone(10, 0)).toBe("inside");
+  });
+});
+
+describe("planFolderMove", () => {
+  const node = (id: string, children: FolderNode[] = []): FolderNode => ({
+    id,
+    name: id,
+    position: 0,
+    children,
+  });
+  const tree = [node("dnb", [node("liquid"), node("jump")]), node("rap"), node("phonk")];
+
+  test("inserts before or after a root sibling, counting without the dragged folder", () => {
+    expect(planFolderMove(tree, "rap", "dnb", "before")).toEqual({ parentId: null, position: 0 });
+    expect(planFolderMove(tree, "rap", "phonk", "after")).toEqual({ parentId: null, position: 2 });
+    expect(planFolderMove(tree, "phonk", "dnb", "after")).toEqual({ parentId: null, position: 1 });
+  });
+
+  test("drops inside a folder at the end of its children", () => {
+    expect(planFolderMove(tree, "rap", "dnb", "inside")).toEqual({ parentId: "dnb", position: 2 });
+    expect(planFolderMove(tree, "rap", "phonk", "inside")).toEqual({
+      parentId: "phonk",
+      position: 0,
+    });
+  });
+
+  test("moves between levels next to a nested sibling", () => {
+    expect(planFolderMove(tree, "rap", "jump", "before")).toEqual({ parentId: "dnb", position: 1 });
+    expect(planFolderMove(tree, "liquid", "rap", "after")).toEqual({ parentId: null, position: 2 });
+  });
+
+  test("refuses no-ops, cycles and unknown folders", () => {
+    expect(planFolderMove(tree, "rap", "rap", "inside")).toBeNull();
+    expect(planFolderMove(tree, "dnb", "liquid", "before")).toBeNull();
+    expect(planFolderMove(tree, "dnb", "liquid", "inside")).toBeNull();
+    expect(planFolderMove(tree, "ghost", "rap", "after")).toBeNull();
   });
 });

@@ -144,3 +144,46 @@ test("user cannot reach the admin API nor the admin button", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Administration" })).toHaveCount(0);
 });
+
+test("admin reorders folders and nests one by drag and drop", async ({ page }) => {
+  const dialog = await openAdmin(page);
+  const tree = dialog.getByRole("navigation", { name: "Dossiers" });
+  const names = [unique("A"), unique("B"), unique("C")];
+  for (const name of names) {
+    // Creating selects the new folder: go back to the inbox so each one lands at the root.
+    await tree.getByRole("button", { name: "Boîte d'arrivée" }).click();
+    await dialog.getByRole("button", { name: "+ Nouveau dossier" }).click();
+    await dialog.getByRole("textbox", { name: "Nom du nouveau dossier" }).fill(name);
+    await page.keyboard.press("Enter");
+    await expect(tree.getByRole("button", { name })).toBeVisible();
+  }
+  const row = (name: string) => tree.getByRole("button", { name });
+  const rootOrder = async () => {
+    const response = await page.request.get("/api/admin/folders");
+    const { folders } = (await response.json()) as {
+      folders: { name: string; children: { name: string }[] }[];
+    };
+    return folders;
+  };
+
+  // Drop C on the top edge of A: C moves before A.
+  const aBox = await row(names[0]).boundingBox();
+  if (!aBox) throw new Error("Row A has no box");
+  await row(names[2]).hover();
+  await page.mouse.down();
+  await page.mouse.move(aBox.x + aBox.width / 2, aBox.y + 2, { steps: 5 });
+  await page.mouse.move(aBox.x + aBox.width / 2, aBox.y + 3, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await rootOrder()).map((f) => f.name).filter((n) => names.includes(n)))
+    .toEqual([names[2], names[0], names[1]]);
+
+  // Drop B in the middle of A: B becomes a child of A.
+  await row(names[1]).dragTo(row(names[0]));
+  await expect
+    .poll(async () =>
+      (await rootOrder()).find((f) => f.name === names[0])?.children.map((c) => c.name),
+    )
+    .toEqual([names[1]]);
+  await closePanel(page);
+});

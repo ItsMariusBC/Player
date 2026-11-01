@@ -252,3 +252,58 @@ export function maintenanceLabel(status: Pick<MaintenanceStatus, "lastRunAt" | "
   const importText = `${result.prunedImports} import${result.prunedImports > 1 ? "s" : ""} purgé${result.prunedImports > 1 ? "s" : ""}`;
   return `Entretien : dernière passe ${when} (${orphanText}, ${importText})`;
 }
+
+/** dataTransfer type of a folder row dragged onto another folder row. */
+export const FOLDER_DRAG_TYPE = "text/x-folder-id";
+
+/** Where a dragged folder lands relative to the row under the pointer. */
+export type FolderDropZone = "before" | "inside" | "after";
+
+/**
+ * Splits a row in three bands: the top quarter inserts before, the bottom quarter inserts
+ * after, the middle drops into the folder. Values outside [0, 1] clamp to the nearest band.
+ */
+export function folderDropZone(offsetY: number, height: number): FolderDropZone {
+  if (height <= 0) return "inside";
+  const ratio = offsetY / height;
+  if (ratio < 0.25) return "before";
+  if (ratio > 0.75) return "after";
+  return "inside";
+}
+
+export interface FolderMove {
+  parentId: string | null;
+  position: number;
+}
+
+/**
+ * The PATCH body that moves `draggedId` onto `targetId` in the given zone, or null when the
+ * drop is a no-op (same folder) or would nest a folder below itself. Positions count the
+ * target's siblings without the dragged folder, matching the server's renumbering.
+ */
+export function planFolderMove(
+  folders: FolderNode[],
+  draggedId: string,
+  targetId: string,
+  zone: FolderDropZone,
+): FolderMove | null {
+  if (draggedId === targetId) return null;
+  const ancestors = folderAncestors(folders);
+  if (!ancestors.has(draggedId) || !ancestors.has(targetId)) return null;
+  // Dropping on or next to one of its own descendants would create a cycle.
+  if (ancestors.get(targetId)?.includes(draggedId)) return null;
+  if (zone === "inside") {
+    const target = findFolder(folders, targetId);
+    if (!target) return null;
+    const siblings = target.children.filter((child) => child.id !== draggedId);
+    return { parentId: targetId, position: siblings.length };
+  }
+  // The chain ends with the target itself; its parent sits just before.
+  const path = ancestors.get(targetId) ?? [];
+  const parentId = path.length > 1 ? path[path.length - 2] : null;
+  const level = parentId === null ? folders : (findFolder(folders, parentId)?.children ?? []);
+  const siblings = level.filter((node) => node.id !== draggedId);
+  const index = siblings.findIndex((node) => node.id === targetId);
+  if (index < 0) return null;
+  return { parentId, position: zone === "before" ? index : index + 1 };
+}

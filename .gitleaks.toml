@@ -1,7 +1,7 @@
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Dépendances, sorties de build et rapports générés"
 paths = [
   '''(^|/)node_modules/''',
@@ -9,3 +9,10 @@ paths = [
   '''(^|/)(dist|build|coverage|reports|playwright-report|test-results)/''',
   '''\.tsbuildinfo$''',
 ]
+
+# Secret de session factice des environnements de développement et de test
+# (.env.development, docker-compose.ci.yml, playwright.config.ts), jamais utilisé en production.
+[[allowlists]]
+description = "SESSION_SECRET de développement et de CI"
+regexTarget = "secret"
+regexes = ['''^(0123456789abcdef){1,4}$''']

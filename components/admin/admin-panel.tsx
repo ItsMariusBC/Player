@@ -29,7 +29,9 @@ import {
   countFolderItems,
   findFolder,
   flattenFolderOptions,
+  planFolderMove,
   tracksInFolder,
+  type FolderDropZone,
 } from "@/lib/admin-format";
 import { performLogout } from "@/lib/api";
 import { useAdminCatalog } from "@/lib/hooks/use-admin-catalog";
@@ -417,6 +419,13 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
   const deleteFolder = (id: string, force: boolean) =>
     void run(() => adminApi.deleteFolder(id, { force }));
 
+  // Drag and drop between folder rows: no request when the plan is a no-op or a cycle.
+  const dropFolder = (id: string, targetId: string, zone: FolderDropZone) => {
+    const move = planFolderMove(folders, id, targetId, zone);
+    if (!move) return;
+    void run(() => adminApi.updateFolder(id, move));
+  };
+
   const selectFolder = (id: string | null) => {
     if (id !== folderId) setSelectedTrackId(null);
     setSelectedFolderId(id);
@@ -704,6 +713,7 @@ export function AdminPanel({ onClose, onCatalogChanged }: AdminPanelProps) {
             selectedId={folderId}
             onSelect={selectFolder}
             onDropTrack={moveTrack}
+            onDropFolder={dropFolder}
             onFolderMenu={(id, x, y) => setMenu({ kind: "folder", id, x, y, step: "main" })}
             renamingId={renamingId}
             onRename={renameFolder}

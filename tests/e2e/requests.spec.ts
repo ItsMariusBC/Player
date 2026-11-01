@@ -3,8 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { loginAs } from "./auth.helpers";
 
 // A valid PCM WAV (mono, 8 kHz, 16 bit) with random samples: its content hash is never shared.
+// Five seconds long: a shorter track ends before « En lecture » shows and the queue moves on.
 function freshWav(): Buffer {
-  const data = randomBytes(800 * 2);
+  const data = randomBytes(8000 * 5 * 2);
   const header = Buffer.alloc(44);
   header.write("RIFF", 0);
   header.writeUInt32LE(36 + data.length, 4);

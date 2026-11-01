@@ -11,6 +11,9 @@ export default defineConfig({
     baseURL: process.env.PLAYER_TEST_URL || "http://127.0.0.1:4173",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // No animated WebGL gradient nor motion: the CI runners have no GPU and the software
+    // renderer made every interaction take tens of seconds.
+    reducedMotion: "reduce",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: process.env.PLAYER_TEST_URL
